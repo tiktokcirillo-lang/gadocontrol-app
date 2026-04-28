@@ -2,7 +2,6 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { Logo } from '@/components/shared/Logo';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,7 +9,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { LogOut, User, Crown } from 'lucide-react';
+import { LogOut, Settings, Crown, Download } from 'lucide-react';
+import { exportarJSON } from '@/lib/exportar';
+import { toast } from 'sonner';
 
 export function AppHeader() {
   const { user, logOut, plan, inTrial, trialDaysLeft } = useAuth();
@@ -46,8 +47,11 @@ export function AppHeader() {
                 <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
               </div>
               <DropdownMenuSeparator />
-              <DropdownMenuItem disabled>
-                <User size={14} className="mr-2" /> Perfil
+              <DropdownMenuItem onClick={() => { window.location.href = '/app/config'; }}>
+                <Settings size={14} className="mr-2" /> Configurações
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { exportarJSON(); toast.success('Backup exportado!'); }}>
+                <Download size={14} className="mr-2" /> Exportar Backup
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={logOut} className="text-destructive">

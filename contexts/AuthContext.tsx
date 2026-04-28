@@ -14,6 +14,7 @@ import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import type { UserPlan } from '@/lib/types';
 import { BETA_TRIAL_DAYS } from '@/lib/types';
+import { verificarConvite, aceitarConvite } from '@/lib/members';
 
 interface AuthContextType {
   user:           User | null;
@@ -82,9 +83,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Verifica plano no Asaas em background (savedPlan é 'free' aqui após early return acima)
       void checkPlanAsaas(uid, ref);
+
+      // Verifica se há convite pendente para o e-mail deste usuário
+      const email = auth.currentUser?.email;
+      if (email) void checkInvite(uid, email);
     } catch (e) {
       console.warn('[Auth] Erro ao carregar dados do usuário:', e);
     }
+  }
+
+  async function checkInvite(uid: string, email: string) {
+    try {
+      const invite = await verificarConvite(email);
+      if (!invite) return;
+      // Aceita automaticamente o convite
+      await aceitarConvite(uid, email, invite.ownerUid);
+    } catch { /* silencia */ }
   }
 
   async function checkPlanAsaas(

@@ -126,11 +126,59 @@ export interface Lote {
   createdAt: string;
 }
 
+export type EstoqueCategoria =
+  | 'Vacina'
+  | 'Medicamento'
+  | 'Vermífugo'
+  | 'Carrapaticida'
+  | 'Suplemento Mineral'
+  | 'Ração / Sal'
+  | 'Equipamento'
+  | 'Outro';
+
+export type EstoqueUnidade = 'kg' | 'L' | 'ml' | 'doses' | 'un.' | 'sacos';
+
+export interface EstoqueItem {
+  id: string;
+  nome: string;
+  categoria: EstoqueCategoria;
+  unidade: EstoqueUnidade;
+  quantidade: number;
+  quantidadeMinima?: number;
+  dataValidade?: string;
+  lote?: string;
+  fornecedor?: string;
+  precoUnitario?: number;
+  obs?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Meta {
   pesoAlvoVenda?: number;
   precoArroba?: number;
   firstUseDate?: string;
   lastBackup?: string;
+  onboardingDone?: boolean;
+  demoLoaded?: boolean;
+  // Fazenda
+  fazNome?: string;
+  fazProprietario?: string;
+  fazMunicipio?: string;
+  fazEstado?: string;
+  fazCAR?: string;
+  fazAreaHa?: number;
+  fazIE?: string; // Inscrição Estadual
+}
+
+export interface ProtocoloSanitario {
+  id: string;
+  nome: string;
+  tipo: EventoTipo;
+  intervaloDias: number;
+  categorias: AnimalCategoria[];
+  ativo: boolean;
+  createdAt: string;
 }
 
 export interface DB {
@@ -138,6 +186,8 @@ export interface DB {
   eventos: Evento[];
   lancamentos: Lancamento[];
   lotes: Lote[];
+  estoque: EstoqueItem[];
+  protocolos: ProtocoloSanitario[];
   meta: Meta;
 }
 

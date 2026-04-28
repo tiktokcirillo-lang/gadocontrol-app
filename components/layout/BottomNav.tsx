@@ -1,15 +1,17 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Beef, Heart, BarChart2, DollarSign, Package } from 'lucide-react';
+import { Home, Beef, Heart, BarChart2, DollarSign, Package, Settings2, Zap } from 'lucide-react';
 
 const NAV_ITEMS = [
-  { href: '/app',          label: 'Início',      icon: Home       },
-  { href: '/app/animais',  label: 'Animais',     icon: Beef       },
-  { href: '/app/saude',    label: 'Saúde',       icon: Heart      },
-  { href: '/app/relatorios', label: 'Relatórios', icon: BarChart2 },
+  { href: '/app',            label: 'Início',    icon: Home       },
+  { href: '/app/campo',      label: 'Campo',     icon: Zap        },
+  { href: '/app/animais',    label: 'Animais',   icon: Beef       },
+  { href: '/app/saude',      label: 'Saúde',     icon: Heart      },
   { href: '/app/financeiro', label: 'Financeiro', icon: DollarSign },
-  { href: '/app/estoque',  label: 'Estoque',     icon: Package    },
+  { href: '/app/estoque',    label: 'Estoque',   icon: Package    },
+  { href: '/app/relatorios', label: 'Relatórios', icon: BarChart2  },
+  { href: '/app/gestao',     label: 'Gestão',    icon: Settings2  },
 ] as const;
 
 export function BottomNav() {

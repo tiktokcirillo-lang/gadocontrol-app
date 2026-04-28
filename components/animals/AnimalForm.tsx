@@ -39,6 +39,7 @@ function emptyForm() {
     brinco: '', nomeGrupo: '', qtdCabecas: '', categoria: '' as AnimalCategoria | '',
     sexo: '' as AnimalSexo | '', raca: '', dataNascimento: '', pesoAtual: '',
     pesoMedio: '', mae: '', pai: '', observacao: '', status: 'Vivo' as Animal['status'],
+    sisbov: '', gta: '', marcaFogo: '', corteOrelha: '',
   };
 }
 
@@ -70,6 +71,10 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
           pai:           a.pai          ?? '',
           observacao:    a.observacao   ?? '',
           status:        a.status,
+          sisbov:        a.sisbov       ?? '',
+          gta:           a.gta          ?? '',
+          marcaFogo:     a.marcaFogo    ?? '',
+          corteOrelha:   a.corteOrelha  ?? '',
         });
       }
     } else {
@@ -128,10 +133,14 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
             dataNascimento: form.dataNascimento || undefined,
             pesoAtual:     form.pesoAtual  ? Number(form.pesoAtual)  : undefined,
             pesoMedio:     form.pesoMedio  ? Number(form.pesoMedio)  : undefined,
-            mae:           form.mae.trim() || undefined,
-            pai:           form.pai.trim() || undefined,
+            mae:           form.mae.trim()        || undefined,
+            pai:           form.pai.trim()        || undefined,
             observacao:    form.observacao.trim() || undefined,
             status:        form.status,
+            sisbov:        form.sisbov.trim()     || undefined,
+            gta:           form.gta.trim()        || undefined,
+            marcaFogo:     form.marcaFogo.trim()  || undefined,
+            corteOrelha:   form.corteOrelha.trim()|| undefined,
             updatedAt:     now,
           };
         }
@@ -149,9 +158,13 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
           dataNascimento: form.dataNascimento || undefined,
           pesoAtual:     form.pesoAtual  ? Number(form.pesoAtual)  : undefined,
           pesoMedio:     form.pesoMedio  ? Number(form.pesoMedio)  : undefined,
-          mae:           form.mae.trim() || undefined,
-          pai:           form.pai.trim() || undefined,
+          mae:           form.mae.trim()        || undefined,
+          pai:           form.pai.trim()        || undefined,
           observacao:    form.observacao.trim() || undefined,
+          sisbov:        form.sisbov.trim()     || undefined,
+          gta:           form.gta.trim()        || undefined,
+          marcaFogo:     form.marcaFogo.trim()  || undefined,
+          corteOrelha:   form.corteOrelha.trim()|| undefined,
           status:        'Vivo',
           createdAt:     now,
           updatedAt:     now,
@@ -273,6 +286,36 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
               <Field label="Pai / Touro">
                 <Input placeholder="Nome ou brinco" value={form.pai} onChange={e => set('pai', e.target.value)} />
               </Field>
+            </div>
+          )}
+
+          {/* Rastreabilidade (apenas individual) */}
+          {mode === 'individual' && (
+            <div className="space-y-3">
+              <p className="text-[11px] font-black text-muted-foreground uppercase tracking-widest pt-1">
+                Rastreabilidade (opcional)
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="SISBOV (15 dígitos)">
+                  <Input
+                    placeholder="Ex: 076XXXXXXXXXX"
+                    maxLength={15}
+                    value={form.sisbov}
+                    onChange={e => set('sisbov', e.target.value.replace(/\D/g, '').slice(0, 15))}
+                  />
+                </Field>
+                <Field label="GTA (Guia de Trânsito)">
+                  <Input placeholder="Nº GTA" value={form.gta} onChange={e => set('gta', e.target.value)} />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Marca a Fogo">
+                  <Input placeholder="Ex: FAZ-001" value={form.marcaFogo} onChange={e => set('marcaFogo', e.target.value)} />
+                </Field>
+                <Field label="Corte de Orelha">
+                  <Input placeholder="Ex: T.D. simples" value={form.corteOrelha} onChange={e => set('corteOrelha', e.target.value)} />
+                </Field>
+              </div>
             </div>
           )}
 

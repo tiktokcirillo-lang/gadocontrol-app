@@ -8,6 +8,8 @@ export const emptyDB = (): DB => ({
   eventos:     [],
   lancamentos: [],
   lotes:       [],
+  estoque:     [],
+  protocolos:  [],
   meta:        {},
 });
 
@@ -22,6 +24,8 @@ export function getDB(): DB {
       eventos:     parsed.eventos     ?? [],
       lancamentos: parsed.lancamentos ?? [],
       lotes:       parsed.lotes       ?? [],
+      estoque:     parsed.estoque     ?? [],
+      protocolos:  parsed.protocolos  ?? [],
       meta:        parsed.meta        ?? {},
     };
   } catch {

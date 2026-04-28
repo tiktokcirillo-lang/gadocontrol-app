@@ -1,18 +1,27 @@
-import { initializeApp, getApps } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
+import { getAuth, type Auth } from 'firebase/auth';
+import { getFirestore, type Firestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey:            process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain:        process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId:         process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket:     process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId:             process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  apiKey:            process.env.NEXT_PUBLIC_FIREBASE_API_KEY            ?? '',
+  authDomain:        process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN        ?? '',
+  projectId:         process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID         ?? '',
+  storageBucket:     process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET     ?? '',
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ?? '',
+  appId:             process.env.NEXT_PUBLIC_FIREBASE_APP_ID              ?? '',
 };
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+// Firebase Client SDK não deve rodar no servidor (SSR/prerender).
+// Guard garante inicialização apenas no browser.
+function initFirebase(): FirebaseApp {
+  if (getApps().length > 0) return getApps()[0];
+  return initializeApp(firebaseConfig);
+}
 
-export const auth = getAuth(app);
-export const db   = getFirestore(app);
+const isBrowser = typeof window !== 'undefined';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const app: FirebaseApp       = isBrowser ? initFirebase() : {} as any;
+export const auth: Auth      = isBrowser ? getAuth(app)      : {} as Auth;
+export const db:   Firestore = isBrowser ? getFirestore(app) : {} as Firestore;
 export default app;

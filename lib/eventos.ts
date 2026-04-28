@@ -1,0 +1,162 @@
+import type { DB, Evento, EventoTipo, Animal } from './types';
+import { GESTACAO_DIAS, TIPO_CAT_DESPESA } from './types';
+import { addDias } from './db';
+
+// Tipos que mostram campo de peso
+export const TIPOS_PESO: EventoTipo[] = ['Pesagem', 'Desmame', 'Nascimento', 'Venda'];
+
+// Tipos que mostram campo de preço (venda)
+export const TIPOS_PRECO_VENDA: EventoTipo[] = ['Venda'];
+
+// Tipos que mostram custo opcional
+export const TIPOS_CUSTO_OPCIONAL: EventoTipo[] = [
+  'Vacina Clostridioses', 'Vacina Febre Aftosa', 'Vacina Brucelose',
+  'Vacina Raiva', 'Vacina – Outro', 'Vermífugo',
+  'Inseminação Artificial', 'Cobertura Natural',
+  'IATF — D0 (Início Protocolo)', 'IATF — D8 (Prostaglandina)',
+  'IATF — D17 (Retirada + EB)', 'IATF — Inseminação',
+  'Banho Carrapaticida', 'Suplementação Mineral', 'Tratamento',
+];
+
+// Tipos que mostram touro/doador
+export const TIPOS_TOURO: EventoTipo[] = ['Inseminação Artificial', 'Cobertura Natural'];
+
+// Aplica efeitos no animal após registrar evento
+export function aplicarEfeitos(db: DB, ev: Evento): void {
+  const idx = db.animais.findIndex(a => a.brinco === ev.brincoAnimal);
+  if (idx === -1) return;
+  const a = { ...db.animais[idx] };
+
+  switch (ev.tipo) {
+    case 'Desmame':
+      a.categoria    = 'Desmamado';
+      a.dataDesmame  = ev.data;
+      if (ev.peso) a.pesoAtual = ev.peso;
+      break;
+    case 'Venda':
+      a.status     = 'Vendido';
+      a.dataVenda  = ev.data;
+      if (ev.preco) a.precoVenda = ev.preco;
+      break;
+    case 'Morte':
+      a.status = 'Morto';
+      break;
+    case 'Pesagem':
+      if (ev.peso) a.pesoAtual = ev.peso;
+      break;
+    case 'Cobertura Natural':
+    case 'Inseminação Artificial':
+    case 'IATF — Inseminação':
+      if (a.categoria === 'Matriz') {
+        a.statusReprodutivo  = 'Prenhe';
+        a.dataPrevistoParto  = addDias(ev.data, GESTACAO_DIAS);
+      }
+      break;
+    case 'Nascimento':
+      a.statusReprodutivo = 'Parida';
+      a.dataUltimoParto   = ev.data;
+      a.numeroParto       = (a.numeroParto ?? 0) + 1;
+      a.dataPrevistoParto = undefined;
+      break;
+    case 'ECC — Avaliação':
+      if (ev.ecc) a.eccAtual = ev.ecc;
+      break;
+    case 'Diagnóstico de Gestação':
+      if (ev.diagResult === 'Positivo (Prenhe)') {
+        a.statusReprodutivo = 'Prenhe';
+        if (ev.diagDias) a.dataPrevistoParto = addDias(ev.data, GESTACAO_DIAS - ev.diagDias);
+      } else if (ev.diagResult === 'Negativo (Vazia)') {
+        a.statusReprodutivo = 'Vazia';
+      }
+      break;
+    case 'Banho Carrapaticida':
+      a.ultimoBanho = ev.data;
+      break;
+  }
+
+  db.animais[idx] = a;
+}
+
+// Agrega despesas: Custo/Despesa + sanidade/reprodução com preco
+export function calcDespesas(db: DB, de?: string | null, ate?: string | null) {
+  const itens: Array<{
+    id: string; tipo: 'despesa'; cat: string;
+    desc: string; valor: number; data: string; origem: 'auto' | 'manual';
+  }> = [];
+
+  const todosTipos = new Set<string>([...Object.keys(TIPO_CAT_DESPESA), 'Custo / Despesa']);
+
+  (db.eventos ?? [])
+    .filter(e => todosTipos.has(e.tipo) && (e.preco ?? 0) > 0)
+    .forEach(e => {
+      if (de  && e.data < de)  return;
+      if (ate && e.data > ate) return;
+      const cat = e.tipo === 'Custo / Despesa'
+        ? (e.custoCat || 'Outro')
+        : (TIPO_CAT_DESPESA[e.tipo as keyof typeof TIPO_CAT_DESPESA] ?? 'Outro');
+      itens.push({
+        id: 'evt_' + e.id, tipo: 'despesa', cat,
+        desc: e.detalhes || e.tipo,
+        valor: e.preco!, data: e.data, origem: 'auto',
+      });
+    });
+
+  (db.lancamentos ?? [])
+    .filter(l => l.tipo === 'despesa')
+    .forEach(l => {
+      if (de  && l.data < de)  return;
+      if (ate && l.data > ate) return;
+      itens.push({ id: l.id, tipo: 'despesa', cat: l.cat, desc: l.descricao, valor: l.valor, data: l.data, origem: 'manual' });
+    });
+
+  return itens.sort((a, b) => b.data.localeCompare(a.data));
+}
+
+// Agrega receitas
+export function calcReceitas(db: DB, de?: string | null, ate?: string | null) {
+  const itens: Array<{
+    id: string; tipo: 'receita'; cat: string;
+    desc: string; valor: number; data: string; origem: 'auto' | 'manual';
+  }> = [];
+
+  (db.animais ?? [])
+    .filter(a => a.status === 'Vendido' && (a.precoVenda ?? 0) > 0)
+    .forEach(a => {
+      const data = a.dataVenda ?? '';
+      if (de  && data && data < de)  return;
+      if (ate && data && data > ate) return;
+      itens.push({
+        id: 'venda_' + a.id, tipo: 'receita', cat: 'Venda de Animal',
+        desc: a.brinco + (a.categoria ? ' — ' + a.categoria : ''),
+        valor: a.precoVenda!, data, origem: 'auto',
+      });
+    });
+
+  (db.lancamentos ?? [])
+    .filter(l => l.tipo === 'receita')
+    .forEach(l => {
+      if (de  && l.data < de)  return;
+      if (ate && l.data > ate) return;
+      itens.push({ id: l.id, tipo: 'receita', cat: l.cat, desc: l.descricao, valor: l.valor, data: l.data, origem: 'manual' });
+    });
+
+  return itens.sort((a, b) => b.data.localeCompare(a.data));
+}
+
+// Datas de período (sem bug de timezone)
+export function periodDates(periodo: string): { de: string | null; ate: string | null } {
+  const now  = new Date();
+  const ymd  = (d: Date) =>
+    d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+  const hoje = ymd(now);
+  const y    = now.getFullYear();
+  const m    = now.getMonth();
+
+  if (periodo === 'mes')  return { de: ymd(new Date(y, m, 1)),  ate: ymd(new Date(y, m + 1, 0)) };
+  if (periodo === 'trim') return { de: ymd(new Date(y, m - 3, 1)), ate: hoje };
+  if (periodo === 'sem')  return { de: ymd(new Date(y, m - 6, 1)), ate: hoje };
+  if (periodo === 'ano')  return { de: ymd(new Date(y, 0, 1)),  ate: ymd(new Date(y, 11, 31)) };
+  return { de: null, ate: null };
+}

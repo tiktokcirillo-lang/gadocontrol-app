@@ -7,13 +7,14 @@ import { fmtDate, fmtMoney, getCabecas, idadeMeses } from '@/lib/db';
 import type { Animal, Evento } from '@/lib/types';
 
 interface Props {
-  animal:   Animal | null;
-  eventos:  Evento[];
-  onClose:  () => void;
-  onEdit:   (id: string) => void;
+  animal:      Animal | null;
+  eventos:     Evento[];
+  onClose:     () => void;
+  onEdit:      (id: string) => void;
+  onNewEvento: (brinco: string) => void;
 }
 
-export function AnimalDetail({ animal, eventos, onClose, onEdit }: Props) {
+export function AnimalDetail({ animal, eventos, onClose, onEdit, onNewEvento }: Props) {
   if (!animal) return null;
   const cab   = getCabecas(animal);
   const meses = idadeMeses(animal.dataNascimento);
@@ -73,13 +74,22 @@ export function AnimalDetail({ animal, eventos, onClose, onEdit }: Props) {
             </Section>
           )}
 
-          <button
-            onClick={() => { onClose(); onEdit(animal.id); }}
-            className="w-full py-2.5 rounded-xl border-2 font-bold text-sm transition-colors hover:bg-muted"
-            style={{ borderColor: '#2D6A2F', color: '#2D6A2F' }}
-          >
-            Editar Animal
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => onNewEvento(animal.brinco || animal.nomeGrupo || '')}
+              className="py-2.5 rounded-xl font-bold text-sm text-white transition-colors"
+              style={{ background: '#2D6A2F' }}
+            >
+              + Registrar Evento
+            </button>
+            <button
+              onClick={() => { onClose(); onEdit(animal.id); }}
+              className="py-2.5 rounded-xl border-2 font-bold text-sm transition-colors hover:bg-muted"
+              style={{ borderColor: '#2D6A2F', color: '#2D6A2F' }}
+            >
+              Editar Animal
+            </button>
+          </div>
         </div>
       </SheetContent>
     </Sheet>

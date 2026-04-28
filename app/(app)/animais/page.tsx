@@ -5,12 +5,12 @@ import { toast } from 'sonner';
 import { useDB } from '@/hooks/useDB';
 import { sumCabecas } from '@/lib/db';
 import { PLAN_LIMIT_FREE } from '@/lib/types';
-import type { Animal, AnimalCategoria } from '@/lib/types';
+import type { AnimalCategoria } from '@/lib/types';
 import { AnimalCard } from '@/components/animals/AnimalCard';
 import { AnimalForm } from '@/components/animals/AnimalForm';
 import { AnimalDetail } from '@/components/animals/AnimalDetail';
+import { EventoForm } from '@/components/animals/EventoForm';
 import { useAuth } from '@/contexts/AuthContext';
-import { Badge } from '@/components/ui/badge';
 
 type StatusFilter = 'Vivo' | 'Vendido' | 'Morto' | 'todos';
 
@@ -19,33 +19,31 @@ const CATEGORIAS: AnimalCategoria[] = [
 ];
 
 export default function AnimaisPage() {
-  const { db, update }      = useDB();
-  const { plan }            = useAuth();
+  const { db, update }        = useDB();
+  const { plan }              = useAuth();
   const [search,  setSearch]  = useState('');
   const [status,  setStatus]  = useState<StatusFilter>('Vivo');
   const [catFilt, setCatFilt] = useState<AnimalCategoria | 'todas'>('todas');
   const [showFilter, setShowFilter] = useState(false);
 
-  // Form / detalhe
-  const [formOpen,   setFormOpen]   = useState(false);
-  const [editId,     setEditId]     = useState<string | null>(null);
-  const [detailId,   setDetailId]   = useState<string | null>(null);
+  const [formOpen,      setFormOpen]      = useState(false);
+  const [editId,        setEditId]        = useState<string | null>(null);
+  const [detailId,      setDetailId]      = useState<string | null>(null);
+  const [eventoOpen,    setEventoOpen]    = useState(false);
+  const [eventoBrinco,  setEventoBrinco]  = useState<string | undefined>();
 
-  const animais = db.animais ?? [];
+  const animais    = db.animais ?? [];
   const vivosCount = sumCabecas(animais.filter(a => a.status === 'Vivo'));
 
-  const filtered = useMemo(() => {
-    return animais.filter(a => {
-      const q = search.toLowerCase();
-      const matchSearch = !q ||
-        (a.brinco?.toLowerCase().includes(q)) ||
-        (a.nomeGrupo?.toLowerCase().includes(q)) ||
-        (a.raca?.toLowerCase().includes(q));
-      const matchStatus = status === 'todos' || a.status === status;
-      const matchCat    = catFilt === 'todas' || a.categoria === catFilt;
-      return matchSearch && matchStatus && matchCat;
-    }).sort((a, b) => (a.brinco || a.nomeGrupo || '').localeCompare(b.brinco || b.nomeGrupo || ''));
-  }, [animais, search, status, catFilt]);
+  const filtered = useMemo(() => animais.filter(a => {
+    const q = search.toLowerCase();
+    return (
+      (!q || (a.brinco?.toLowerCase().includes(q)) || (a.nomeGrupo?.toLowerCase().includes(q)) || (a.raca?.toLowerCase().includes(q))) &&
+      (status === 'todos' || a.status === status) &&
+      (catFilt === 'todas' || a.categoria === catFilt)
+    );
+  }).sort((a, b) => (a.brinco || a.nomeGrupo || '').localeCompare(b.brinco || b.nomeGrupo || '')),
+  [animais, search, status, catFilt]);
 
   function openNew() {
     if (plan !== 'pro' && vivosCount >= PLAN_LIMIT_FREE) {
@@ -56,15 +54,17 @@ export default function AnimaisPage() {
     setFormOpen(true);
   }
 
-  function openEdit(id: string) {
-    setEditId(id);
-    setFormOpen(true);
+  function openEdit(id: string) { setEditId(id); setFormOpen(true); }
+
+  function openEvento(brinco: string) {
+    setEventoBrinco(brinco);
+    setDetailId(null);
+    setEventoOpen(true);
   }
 
   function handleDelete(id: string) {
     const a = animais.find(x => x.id === id);
-    if (!a) return;
-    if (!confirm(`Excluir ${a.brinco || a.nomeGrupo}?`)) return;
+    if (!a || !confirm(`Excluir ${a.brinco || a.nomeGrupo}?`)) return;
     update(d => { d.animais = d.animais.filter(x => x.id !== id); });
     toast.success('Animal excluído.');
     if (detailId === id) setDetailId(null);
@@ -83,25 +83,28 @@ export default function AnimaisPage() {
             {plan !== 'pro' && ` · ${vivosCount}/${PLAN_LIMIT_FREE} no plano grátis`}
           </p>
         </div>
-        <button
-          onClick={openNew}
-          className="flex items-center gap-1.5 text-white text-sm font-bold px-3 py-2 rounded-xl"
-          style={{ background: '#2D6A2F' }}
-        >
-          <Plus size={16} /> Novo
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => openEvento('')}
+            className="flex items-center gap-1 text-sm font-bold px-3 py-2 rounded-xl border"
+            style={{ borderColor: '#2D6A2F', color: '#2D6A2F' }}>
+            + Evento
+          </button>
+          <button onClick={openNew}
+            className="flex items-center gap-1.5 text-white text-sm font-bold px-3 py-2 rounded-xl"
+            style={{ background: '#2D6A2F' }}>
+            <Plus size={16} /> Animal
+          </button>
+        </div>
       </div>
 
-      {/* Plano limite */}
+      {/* Barra progresso plano */}
       {plan !== 'pro' && (
         <div className="rounded-xl overflow-hidden bg-muted h-1.5">
-          <div
-            className="h-full rounded-xl transition-all"
+          <div className="h-full rounded-xl transition-all"
             style={{
               width: `${Math.min(100, (vivosCount / PLAN_LIMIT_FREE) * 100)}%`,
               background: vivosCount >= PLAN_LIMIT_FREE ? '#ef4444' : '#2D6A2F',
-            }}
-          />
+            }} />
         </div>
       )}
 
@@ -109,23 +112,17 @@ export default function AnimaisPage() {
       <div className="flex gap-2">
         <div className="relative flex-1">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Buscar por brinco, nome..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full border rounded-lg pl-8 pr-3 py-2 text-sm bg-background"
-          />
+          <input type="text" placeholder="Buscar brinco, nome, raça..."
+            value={search} onChange={e => setSearch(e.target.value)}
+            className="w-full border rounded-lg pl-8 pr-8 py-2 text-sm bg-background" />
           {search && (
             <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2">
               <X size={13} className="text-muted-foreground" />
             </button>
           )}
         </div>
-        <button
-          onClick={() => setShowFilter(v => !v)}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${showFilter ? 'border-[#2D6A2F] text-[#2D6A2F] bg-green-50' : 'text-muted-foreground'}`}
-        >
+        <button onClick={() => setShowFilter(v => !v)}
+          className={`px-3 py-2 rounded-lg border text-sm transition-colors ${showFilter ? 'border-[#2D6A2F] text-[#2D6A2F] bg-green-50' : 'text-muted-foreground'}`}>
           <SlidersHorizontal size={14} />
         </button>
       </div>
@@ -133,36 +130,22 @@ export default function AnimaisPage() {
       {/* Status tabs */}
       <div className="flex gap-1.5 flex-wrap">
         {(['Vivo','Vendido','Morto','todos'] as StatusFilter[]).map(s => (
-          <button
-            key={s}
-            onClick={() => setStatus(s)}
-            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
-              status === s ? 'text-white border-transparent' : 'text-muted-foreground'
-            }`}
-            style={status === s ? { background: '#2D6A2F' } : {}}
-          >
+          <button key={s} onClick={() => setStatus(s)}
+            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${status === s ? 'text-white border-transparent' : 'text-muted-foreground'}`}
+            style={status === s ? { background: '#2D6A2F' } : {}}>
             {s === 'todos' ? 'Todos' : s}
           </button>
         ))}
       </div>
 
-      {/* Filtro de categoria */}
+      {/* Filtro categoria */}
       {showFilter && (
         <div className="flex gap-1.5 flex-wrap">
-          <button
-            onClick={() => setCatFilt('todas')}
-            className={`px-3 py-1 rounded-full text-xs font-semibold border ${catFilt === 'todas' ? 'bg-muted' : ''}`}
-          >
-            Todas
-          </button>
+          <button onClick={() => setCatFilt('todas')}
+            className={`px-3 py-1 rounded-full text-xs font-semibold border ${catFilt === 'todas' ? 'bg-muted' : ''}`}>Todas</button>
           {CATEGORIAS.map(c => (
-            <button
-              key={c}
-              onClick={() => setCatFilt(c)}
-              className={`px-3 py-1 rounded-full text-xs font-semibold border ${catFilt === c ? 'bg-muted' : ''}`}
-            >
-              {c}
-            </button>
+            <button key={c} onClick={() => setCatFilt(c)}
+              className={`px-3 py-1 rounded-full text-xs font-semibold border ${catFilt === c ? 'bg-muted' : ''}`}>{c}</button>
           ))}
         </div>
       )}
@@ -171,42 +154,32 @@ export default function AnimaisPage() {
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
           <span className="text-5xl">🐄</span>
-          <p className="font-bold">
-            {animais.length === 0 ? 'Nenhum animal cadastrado' : 'Nenhum resultado'}
-          </p>
+          <p className="font-bold">{animais.length === 0 ? 'Nenhum animal cadastrado' : 'Nenhum resultado'}</p>
           <p className="text-sm text-muted-foreground">
-            {animais.length === 0
-              ? 'Toque em "Novo" para cadastrar o primeiro animal.'
-              : 'Tente outros filtros ou termos de busca.'}
+            {animais.length === 0 ? 'Toque em "+ Animal" para cadastrar.' : 'Tente outros filtros.'}
           </p>
         </div>
       ) : (
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">{filtered.length} resultado(s)</p>
           {filtered.map(a => (
-            <AnimalCard
-              key={a.id}
-              animal={a}
-              onEdit={openEdit}
-              onDelete={handleDelete}
-              onDetail={setDetailId}
-            />
+            <AnimalCard key={a.id} animal={a}
+              onEdit={openEdit} onDelete={handleDelete} onDetail={setDetailId} />
           ))}
         </div>
       )}
 
       {/* Modais */}
-      <AnimalForm
-        open={formOpen}
-        animalId={editId}
-        onClose={() => { setFormOpen(false); setEditId(null); }}
-      />
-      <AnimalDetail
-        animal={detailAnimal}
-        eventos={db.eventos ?? []}
+      <AnimalForm open={formOpen} animalId={editId}
+        onClose={() => { setFormOpen(false); setEditId(null); }} />
+
+      <AnimalDetail animal={detailAnimal} eventos={db.eventos ?? []}
         onClose={() => setDetailId(null)}
         onEdit={id => { setDetailId(null); openEdit(id); }}
-      />
+        onNewEvento={openEvento} />
+
+      <EventoForm open={eventoOpen} brincoFixed={eventoBrinco}
+        onClose={() => { setEventoOpen(false); setEventoBrinco(undefined); }} />
     </div>
   );
 }

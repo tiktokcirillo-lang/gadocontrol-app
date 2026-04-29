@@ -8,9 +8,10 @@ import { useDB } from '@/hooks/useDB';
 import { fmtMoney, fmtDate, diffDays, getCabecas, sumCabecas } from '@/lib/db';
 import { CAT_ICON } from '@/lib/types';
 import { gerarRelatorioMensal } from '@/lib/exportar';
+import { calcDespesas, periodDates } from '@/lib/eventos';
 import type { AnimalCategoria } from '@/lib/types';
 
-type Tab = 'rebanho' | 'desempenho' | 'curva' | 'vendas' | 'projecao' | 'lotes' | 'pdf';
+type Tab = 'rebanho' | 'desempenho' | 'curva' | 'vendas' | 'projecao' | 'lotes' | 'custos' | 'pdf';
 
 const CORES_CAT: Record<string, string> = {
   Bezerro:   '#f59e0b',
@@ -54,6 +55,7 @@ export default function RelatoriosPage() {
           { key: 'vendas',     label: '💰 Vendas'     },
           { key: 'projecao',   label: '🔮 Projeção'   },
           { key: 'lotes',      label: '🗂 Lotes'      },
+          { key: 'custos',     label: '💹 Custos'      },
           { key: 'pdf',        label: '📄 PDF Mensal'  },
         ] as { key: Tab; label: string }[]).map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
@@ -70,6 +72,7 @@ export default function RelatoriosPage() {
       {tab === 'vendas'     && <TabVendas     db={db} />}
       {tab === 'projecao'   && <TabProjecao   db={db} />}
       {tab === 'lotes'      && <TabLotes      db={db} />}
+      {tab === 'custos'     && <TabCustos     db={db} />}
       {tab === 'pdf'        && <TabPDFMensal  />}
     </div>
   );
@@ -918,6 +921,380 @@ function Vazio({ msg }: { msg: string }) {
   return (
     <div className="p-6 text-center">
       <p className="text-sm text-muted-foreground">{msg}</p>
+    </div>
+  );
+}
+
+// ─── Aba Custos ──────────────────────────────────────────────────────────────
+
+// ── Benchmarks EMBRAPA / SCOT Consultoria / CNA — 2023-2024 ──────────────────
+
+const BENCH_SISTEMA = [
+  { key: 'ext',  label: 'Extensivo (pasto)',       min: 480,  max: 780,  cor: '#16a34a' },
+  { key: 'semi', label: 'Semi-intensivo',           min: 780,  max: 1300, cor: '#ca8a04' },
+  { key: 'int',  label: 'Intensivo (confinamento)', min: 1500, max: 3200, cor: '#dc2626' },
+] as const;
+
+const BENCH_POR_CAT: Record<string, { min: number; max: number; fase: string }> = {
+  Bezerro:   { min: 280,  max: 450,  fase: 'Fase cria'   },
+  Bezerra:   { min: 280,  max: 450,  fase: 'Fase cria'   },
+  Desmamado: { min: 380,  max: 620,  fase: 'Recria'      },
+  Novilho:   { min: 520,  max: 850,  fase: 'Recria'      },
+  Novilha:   { min: 480,  max: 780,  fase: 'Recria'      },
+  Matriz:    { min: 650,  max: 1050, fase: 'Cria'        },
+  Boi:       { min: 620,  max: 1000, fase: 'Terminação'  },
+  Touro:     { min: 850,  max: 1600, fase: 'Reprodução'  },
+};
+
+// Breakdown típico de custos (%) — EMBRAPA/CNA
+const BENCH_BREAKDOWN = [
+  { label: 'Nutrição / Suplementação', min: 35, max: 45, cor: '#16a34a' },
+  { label: 'Mão de obra',              min: 20, max: 30, cor: '#2563eb' },
+  { label: 'Sanidade',                 min: 10, max: 15, cor: '#dc2626' },
+  { label: 'Infraestrutura',           min: 10, max: 20, cor: '#7c3aed' },
+  { label: 'Outros',                   min:  5, max: 10, cor: '#6b7280' },
+];
+
+// GMD referência EMBRAPA por categoria (kg/dia)
+const BENCH_GMD_FULL: Record<string, { min: number; max: number; fase: string }> = {
+  Bezerro:   { min: 0.5, max: 0.8, fase: 'Pré-desmame'      },
+  Bezerra:   { min: 0.4, max: 0.7, fase: 'Pré-desmame'      },
+  Desmamado: { min: 0.5, max: 0.8, fase: 'Recria extensiva' },
+  Novilho:   { min: 0.5, max: 0.9, fase: 'Recria extensiva' },
+  Novilha:   { min: 0.4, max: 0.7, fase: 'Recria extensiva' },
+  Boi:       { min: 0.7, max: 1.1, fase: 'Terminação'       },
+  Matriz:    { min: 0.3, max: 0.5, fase: 'Mantença'         },
+  Touro:     { min: 0.3, max: 0.5, fase: 'Mantença'         },
+};
+
+// Mortalidade aceitável (%) — EMBRAPA
+const BENCH_MORT = {
+  bezerros: 5,  // até 5% tolerável
+  adultos:  2,  // até 2% tolerável
+};
+
+type Periodo = 'mes' | 'trim' | 'sem' | 'ano' | 'tudo';
+
+function TabCustos({ db }: { db: ReturnType<typeof useDB>['db'] }) {
+  const [periodo, setPeriodo] = useState<Periodo>('ano');
+  const [verRef,  setVerRef]  = useState(false);
+
+  const animaisVivos = (db.animais ?? []).filter(a => a.status === 'Vivo');
+  const totalCab     = sumCabecas(animaisVivos);
+
+  // ── Calcula custos do período ──────────────────────────────────────────────
+  const { totalDesp, meses, custoCabMes, custoCabAno, breakdownReal } = useMemo(() => {
+    const { de, ate } = periodo === 'tudo' ? { de: null, ate: null } : periodDates(periodo);
+    const despesas    = calcDespesas(db, de, ate);
+    const totalDesp   = despesas.reduce((s, d) => s + d.valor, 0);
+
+    // Número de meses do período
+    let meses = 1;
+    if (periodo === 'trim') meses = 3;
+    else if (periodo === 'sem') meses = 6;
+    else if (periodo === 'ano') meses = 12;
+    else if (periodo === 'tudo') {
+      const primeira = [...(db.animais ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+      if (primeira) {
+        const ms = (Date.now() - new Date(primeira.createdAt).getTime()) / (1000 * 60 * 60 * 24 * 30.4);
+        meses = Math.max(1, Math.round(ms));
+      }
+    }
+
+    const custoCabMes = totalCab > 0 ? totalDesp / (totalCab * meses) : 0;
+    const custoCabAno = custoCabMes * 12;
+
+    // Breakdown real por categoria de custo
+    const catMap: Record<string, number> = {};
+    despesas.forEach(d => {
+      catMap[d.cat] = (catMap[d.cat] ?? 0) + d.valor;
+    });
+    const breakdownReal = Object.entries(catMap)
+      .map(([cat, val]) => ({ cat, val, pct: totalDesp > 0 ? (val / totalDesp) * 100 : 0 }))
+      .sort((a, b) => b.val - a.val);
+
+    return { totalDesp, meses, custoCabMes, custoCabAno, breakdownReal };
+  }, [db, periodo, totalCab]);
+
+  // ── GMD real por categoria ──────────────────────────────────────────────────
+  const gmdPorCat = useMemo(() => {
+    const result: Record<string, { gmd: number; n: number }> = {};
+    const eventos = db.eventos ?? [];
+    animaisVivos.forEach(a => {
+      const brinco = a.brinco || a.nomeGrupo;
+      if (!brinco) return;
+      const pesagens = eventos
+        .filter(e => e.tipo === 'Pesagem' && e.peso && e.brincoAnimal === brinco)
+        .sort((x, y) => x.data.localeCompare(y.data));
+      if (pesagens.length < 2) return;
+      const first = pesagens[0], last = pesagens[pesagens.length - 1];
+      const dias  = Math.max(1, Math.round((new Date(last.data).getTime() - new Date(first.data).getTime()) / 86400000));
+      const gmd   = (last.peso! - first.peso!) / dias;
+      if (gmd <= 0) return;
+      const cat = a.categoria;
+      if (!result[cat]) result[cat] = { gmd: 0, n: 0 };
+      result[cat].gmd += gmd;
+      result[cat].n   += 1;
+    });
+    return Object.entries(result).map(([cat, { gmd, n }]) => ({ cat, gmd: gmd / n }));
+  }, [animaisVivos, db.eventos]);
+
+  // ── Mortalidade ────────────────────────────────────────────────────────────
+  const { mortBezerros, mortAdultos } = useMemo(() => {
+    const mortos  = (db.animais ?? []).filter(a => a.status === 'Morto');
+    const bezerrosMortos = mortos.filter(a => ['Bezerro','Bezerra'].includes(a.categoria)).length;
+    const totalBezerros  = animaisVivos.filter(a => ['Bezerro','Bezerra'].includes(a.categoria)).length + bezerrosMortos;
+    const adultMortos    = mortos.filter(a => !['Bezerro','Bezerra'].includes(a.categoria)).length;
+    const totalAdultos   = animaisVivos.filter(a => !['Bezerro','Bezerra'].includes(a.categoria)).length + adultMortos;
+    return {
+      mortBezerros: totalBezerros > 0 ? (bezerrosMortos / totalBezerros) * 100 : 0,
+      mortAdultos:  totalAdultos  > 0 ? (adultMortos  / totalAdultos)  * 100 : 0,
+    };
+  }, [db.animais, animaisVivos]);
+
+  // ── Break-even @ ──────────────────────────────────────────────────────────
+  // Peso médio de venda (kg vivo). Se sem dados, usa referência 480 kg
+  const pesoVendaMedio = useMemo(() => {
+    const vendas = (db.eventos ?? []).filter(e => e.tipo === 'Venda' && e.peso);
+    if (vendas.length === 0) return 480;
+    return vendas.reduce((s, e) => s + e.peso!, 0) / vendas.length;
+  }, [db.eventos]);
+
+  // arrobas = (peso vivo × rendimento carcaça 52%) / 15 kg por arroba
+  const arrobasPorAnimal = (pesoVendaMedio * 0.52) / 15;
+  const breakEvenArroba  = arrobasPorAnimal > 0 ? custoCabAno / arrobasPorAnimal : 0;
+
+  // ── Eficiência vs benchmark extensivo ─────────────────────────────────────
+  const benchExt = BENCH_SISTEMA[0];
+  const benchMid  = (benchExt.min + benchExt.max) / 2;
+  function eficiencia(): { label: string; cor: string; pct: number } {
+    if (custoCabAno === 0) return { label: 'Sem dados', cor: '#6b7280', pct: 50 };
+    if (custoCabAno < benchExt.min) return { label: 'Excelente — abaixo do benchmark', cor: '#16a34a', pct: 20 };
+    if (custoCabAno < benchMid)     return { label: 'Bom — dentro da faixa esperada',  cor: '#65a30d', pct: 45 };
+    if (custoCabAno < benchExt.max) return { label: 'Regular — próximo do limite',      cor: '#ca8a04', pct: 70 };
+    return { label: 'Atenção — acima do benchmark', cor: '#dc2626', pct: 90 };
+  }
+  const ef = eficiencia();
+
+  const fmtR  = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const fmtN1 = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+  if (totalCab === 0) {
+    return <Vazio msg="Cadastre animais para ver a análise de custos." />;
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Período */}
+      <div className="flex gap-1 rounded-lg border p-1">
+        {(['mes','trim','sem','ano','tudo'] as Periodo[]).map(p => (
+          <button key={p} onClick={() => setPeriodo(p)}
+            className={`flex-1 rounded-md py-1.5 text-[10px] font-bold transition-colors ${periodo === p ? 'text-white' : 'text-muted-foreground'}`}
+            style={periodo === p ? { background: '#2D6A2F' } : {}}>
+            {p === 'mes' ? '1M' : p === 'trim' ? '3M' : p === 'sem' ? '6M' : p === 'ano' ? '1A' : 'Tudo'}
+          </button>
+        ))}
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 gap-3">
+        <MiniKpi label="Total de Despesas" value={fmtR(totalDesp)} cor="text-red-600" />
+        <MiniKpi label="Cabeças"           value={String(totalCab)}  cor="text-foreground" />
+        <MiniKpi label="Custo / Cab / Mês" value={fmtR(custoCabMes)} cor="text-amber-600" />
+        <MiniKpi label="Custo / Cab / Ano" value={fmtR(custoCabAno)} cor="text-amber-700" />
+      </div>
+
+      {/* Eficiência vs benchmark */}
+      <Section title="Eficiência vs Benchmark EMBRAPA">
+        <div className="p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-bold" style={{ color: ef.cor }}>{ef.label}</span>
+            <span className="text-xs text-muted-foreground">Extensivo: {fmtR(benchExt.min)}–{fmtR(benchExt.max)}/ano</span>
+          </div>
+          {/* Barra de gauge */}
+          <div className="relative h-3 rounded-full bg-muted overflow-hidden">
+            {/* zona verde (abaixo do mín) */}
+            <div className="absolute left-0 top-0 h-full rounded-full bg-green-400"
+              style={{ width: '25%' }} />
+            {/* zona amarela */}
+            <div className="absolute top-0 h-full bg-amber-400"
+              style={{ left: '25%', width: '40%' }} />
+            {/* zona vermelha */}
+            <div className="absolute top-0 h-full rounded-r-full bg-red-400"
+              style={{ left: '65%', width: '35%' }} />
+            {/* ponteiro */}
+            <div className="absolute top-0 h-full w-1 bg-foreground rounded-full transition-all"
+              style={{ left: `calc(${Math.min(ef.pct, 98)}% - 2px)` }} />
+          </div>
+          <div className="flex justify-between text-[10px] text-muted-foreground">
+            <span>Excelente</span><span>Regular</span><span>Atenção</span>
+          </div>
+
+          {/* Comparativo por sistema */}
+          <div className="space-y-2 pt-1">
+            {BENCH_SISTEMA.map(s => {
+              const dentro = custoCabAno >= s.min && custoCabAno <= s.max;
+              return (
+                <div key={s.key} className="flex items-center gap-3">
+                  <div className="w-2 h-2 rounded-full shrink-0" style={{ background: s.cor }} />
+                  <div className="flex-1 text-xs">{s.label}</div>
+                  <div className="text-xs font-bold text-muted-foreground tabular-nums">
+                    {fmtR(s.min)}–{fmtR(s.max)}
+                  </div>
+                  {dentro && (
+                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full text-white"
+                      style={{ background: s.cor }}>✓</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </Section>
+
+      {/* Break-even @ */}
+      <Section title="Break-even por Arroba">
+        <div className="p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-muted/50 p-3">
+              <p className="text-[10px] text-muted-foreground uppercase font-bold">Seu break-even</p>
+              <p className="text-lg font-black text-amber-600 mt-1">
+                {breakEvenArroba > 0 ? fmtR(breakEvenArroba) : '–'}<span className="text-xs font-normal">/@</span>
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                Base: {Math.round(pesoVendaMedio)} kg vivo · {fmtN1(arrobasPorAnimal)} @/animal
+              </p>
+            </div>
+            <div className="rounded-xl bg-muted/50 p-3">
+              <p className="text-[10px] text-muted-foreground uppercase font-bold">Referência EMBRAPA</p>
+              <p className="text-sm font-black text-foreground mt-1">R$ 185–255<span className="text-xs font-normal">/@ ext.</span></p>
+              <p className="text-sm font-black text-foreground">R$ 225–310<span className="text-xs font-normal">/@ semi</span></p>
+            </div>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            * Cálculo: custo/cab/ano ÷ (@/animal estimadas). Rendimento de carcaça: 52%. 1@ = 15 kg carcaça.
+          </p>
+        </div>
+      </Section>
+
+      {/* Breakdown de custos real */}
+      {breakdownReal.length > 0 && (
+        <Section title="Composição de Despesas (Período)">
+          <div className="divide-y">
+            {breakdownReal.slice(0, 8).map(({ cat, val, pct }) => (
+              <div key={cat} className="px-4 py-2.5">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold truncate flex-1">{cat}</span>
+                  <span className="text-xs font-bold text-muted-foreground ml-2">{fmtN1(pct)}%</span>
+                  <span className="text-xs font-bold ml-3 tabular-nums">{fmtR(val)}</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div className="h-full rounded-full bg-amber-500 transition-all"
+                    style={{ width: `${Math.min(pct, 100)}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Comparativo breakdown vs EMBRAPA */}
+      <Section title="Benchmark de Composição de Custos (EMBRAPA/CNA)">
+        <div className="divide-y">
+          {BENCH_BREAKDOWN.map(b => (
+            <div key={b.label} className="px-4 py-2.5 flex items-center gap-3">
+              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: b.cor }} />
+              <span className="text-xs flex-1">{b.label}</span>
+              <span className="text-xs font-bold text-muted-foreground">{b.min}–{b.max}%</span>
+            </div>
+          ))}
+        </div>
+        <p className="text-[10px] text-muted-foreground px-4 pb-3">
+          Fonte: EMBRAPA Gado de Corte / CNA — sistema extensivo Nelore, referência nacional 2023.
+        </p>
+      </Section>
+
+      {/* GMD real vs benchmark */}
+      {gmdPorCat.length > 0 && (
+        <Section title="GMD Real vs Referência EMBRAPA">
+          <div className="divide-y">
+            {gmdPorCat.map(({ cat, gmd }) => {
+              const ref  = BENCH_GMD_FULL[cat];
+              const ok   = ref ? gmd >= ref.min : null;
+              const icon = ok === null ? '–' : ok ? '✅' : '⚠️';
+              return (
+                <div key={cat} className="px-4 py-2.5 flex items-center gap-3">
+                  <span className="text-sm shrink-0">{icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold">{cat}</p>
+                    {ref && <p className="text-[10px] text-muted-foreground">{ref.fase} · Ref: {ref.min}–{ref.max} kg/dia</p>}
+                  </div>
+                  <span className={`text-xs font-black tabular-nums ${ok === false ? 'text-amber-600' : ok ? 'text-green-600' : ''}`}>
+                    {fmtN1(gmd)} kg/dia
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+      )}
+
+      {/* Mortalidade */}
+      <Section title="Mortalidade vs Tolerância EMBRAPA">
+        <div className="divide-y">
+          {[
+            { label: 'Bezerros', val: mortBezerros, bench: BENCH_MORT.bezerros },
+            { label: 'Adultos',  val: mortAdultos,  bench: BENCH_MORT.adultos  },
+          ].map(m => {
+            const ok   = m.val <= m.bench;
+            return (
+              <div key={m.label} className="px-4 py-3 flex items-center gap-3">
+                <span className="text-base">{ok ? '✅' : '⚠️'}</span>
+                <div className="flex-1">
+                  <p className="text-xs font-bold">{m.label}</p>
+                  <p className="text-[10px] text-muted-foreground">Tolerável: até {m.bench}% (EMBRAPA)</p>
+                </div>
+                <span className={`text-sm font-black tabular-nums ${ok ? 'text-green-600' : 'text-amber-600'}`}>
+                  {fmtN1(m.val)}%
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </Section>
+
+      {/* Tabela de referência por categoria */}
+      <div>
+        <button
+          onClick={() => setVerRef(v => !v)}
+          className="w-full rounded-xl border bg-card px-4 py-3 text-left text-xs font-bold flex items-center justify-between"
+        >
+          <span>📋 Custo de referência por categoria (EMBRAPA)</span>
+          <span className="text-muted-foreground">{verRef ? '▲' : '▼'}</span>
+        </button>
+        {verRef && (
+          <div className="rounded-b-xl border border-t-0 bg-card overflow-hidden">
+            <div className="grid grid-cols-4 bg-muted/50 px-3 py-2 text-[9px] font-black uppercase text-muted-foreground">
+              <div className="col-span-2">Categoria</div>
+              <div className="text-right">R$/cab/ano</div>
+              <div className="text-right">Fase</div>
+            </div>
+            {Object.entries(BENCH_POR_CAT).map(([cat, b]) => (
+              <div key={cat} className="grid grid-cols-4 px-3 py-2.5 border-t text-xs items-center">
+                <div className="col-span-2 font-semibold">{cat}</div>
+                <div className="text-right text-muted-foreground tabular-nums">
+                  {b.min}–{b.max}
+                </div>
+                <div className="text-right text-[10px] text-muted-foreground">{b.fase}</div>
+              </div>
+            ))}
+            <p className="text-[10px] text-muted-foreground px-3 pb-3 pt-1">
+              Fonte: EMBRAPA Gado de Corte (MS), SCOT Consultoria, CNA — sistema extensivo Nelore, referência nacional 2023-2024.
+              Valores em R$ — ajuste conforme custo de terra, mão de obra e insumos da sua região.
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

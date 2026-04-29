@@ -483,22 +483,27 @@ function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
 
   function salvar() {
     if (!nome.trim()) { toast.error('Informe o nome do lote.'); return; }
+    // Gera o ID e captura flags ANTES de entrar no update para evitar closures instáveis
+    const isEdit  = !!editLote;
+    const loteId  = editLote ? editLote.id : uid();
+    const nomeTrimmed = nome.trim();
+    const descTrimmed = descricao.trim() || undefined;
+    const selSet  = new Set(selAnimais);
+
     update(d => {
       if (!d.lotes) d.lotes = [];
-      const loteId = editLote ? editLote.id : uid();
 
-      if (editLote) {
-        const idx = d.lotes.findIndex(l => l.id === editLote.id);
+      if (isEdit) {
+        const idx = d.lotes.findIndex(l => l.id === loteId);
         if (idx !== -1) {
-          d.lotes[idx].nome      = nome.trim();
-          d.lotes[idx].descricao = descricao.trim() || undefined;
+          d.lotes[idx].nome      = nomeTrimmed;
+          d.lotes[idx].descricao = descTrimmed;
         }
       } else {
-        d.lotes.push({ id: loteId, nome: nome.trim(), descricao: descricao.trim() || undefined, createdAt: new Date().toISOString() });
+        d.lotes.push({ id: loteId, nome: nomeTrimmed, descricao: descTrimmed, createdAt: new Date().toISOString() });
       }
 
       // Atualiza loteId dos animais em massa
-      const selSet = new Set(selAnimais);
       (d.animais ?? []).forEach((a, i) => {
         if (selSet.has(a.id)) {
           d.animais[i] = { ...a, loteId };
@@ -506,9 +511,9 @@ function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
           d.animais[i] = { ...a, loteId: undefined };
         }
       });
-
-      toast.success(editLote ? 'Lote atualizado!' : 'Lote criado!');
     });
+
+    toast.success(isEdit ? 'Lote atualizado!' : 'Lote criado!');
     setSheetOpen(false);
   }
 

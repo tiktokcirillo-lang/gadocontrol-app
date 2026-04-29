@@ -46,6 +46,7 @@ function emptyForm() {
     sexo: '' as AnimalSexo | '', raca: '', dataNascimento: '', pesoAtual: '',
     pesoMedio: '', mae: '', pai: '', observacao: '', status: 'Vivo' as Animal['status'],
     sisbov: '', gta: '', marcaFogo: '', corteOrelha: '', foto: '',
+    loteId: '',
     // Compra
     comprado: false, precoCompra: '', dataCompra: '', origemCompra: '',
   };
@@ -174,6 +175,7 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
           precoCompra:   String(a.precoCompra ?? ''),
           dataCompra:    a.dataCompra   ?? '',
           origemCompra:  a.origemCompra ?? '',
+          loteId:        a.loteId       ?? '',
         });
       }
     } else {
@@ -256,6 +258,7 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
             corteOrelha:    form.corteOrelha.trim() || undefined,
             foto:           form.foto || undefined,
             ...compraFields,
+            loteId:         form.loteId || undefined,
             updatedAt:      now,
           };
         }
@@ -283,6 +286,7 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
           corteOrelha:    form.corteOrelha.trim() || undefined,
           foto:           form.foto || undefined,
           ...compraFields,
+          loteId:         form.loteId || undefined,
           status:         'Vivo',
           createdAt:      now,
           updatedAt:      now,
@@ -525,6 +529,22 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
                 <option>Vivo</option>
                 <option>Vendido</option>
                 <option>Morto</option>
+              </select>
+            </Field>
+          )}
+
+          {/* Lote */}
+          {(db.lotes ?? []).length > 0 && (
+            <Field label="Lote">
+              <select
+                value={form.loteId}
+                onChange={e => set('loteId', e.target.value)}
+                className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+              >
+                <option value="">Sem lote</option>
+                {(db.lotes ?? []).map(l => (
+                  <option key={l.id} value={l.id}>{l.nome}</option>
+                ))}
               </select>
             </Field>
           )}

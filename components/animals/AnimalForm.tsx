@@ -70,7 +70,8 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
 
     // Sexo: inferido da categoria ou palavras diretas
     let sexo: AnimalSexo | '' = '';
-    if (tln.includes('macho'))  sexo = 'Macho';
+    if (tln.includes('misto') || tln.includes('mistos') || tln.includes('mista')) sexo = 'Misto';
+    else if (tln.includes('macho'))  sexo = 'Macho';
     else if (tln.includes('femea') || tln.includes('fêmea')) sexo = 'Fêmea';
     else if (['Bezerra','Novilha','Matriz'].includes(categoria)) sexo = 'Fêmea';
     else if (['Bezerro','Novilho','Touro','Boi'].includes(categoria)) sexo = 'Macho';
@@ -412,6 +413,7 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
                 <option value="">Selecione...</option>
                 <option>Macho</option>
                 <option>Fêmea</option>
+                {mode === 'grupo' && <option>Misto</option>}
               </select>
             </Field>
           </div>

@@ -12,7 +12,7 @@ export type AnimalCategoria =
   | 'Matriz'
   | 'Touro'
   | 'Boi';
-export type AnimalSexo = 'Macho' | 'Fêmea';
+export type AnimalSexo = 'Macho' | 'Fêmea' | 'Misto';
 export type AnimalTipo = 'individual' | 'grupo';
 export type StatusReprodutivo = 'Vazia' | 'Prenhe' | 'Parida';
 

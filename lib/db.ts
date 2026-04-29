@@ -4,13 +4,14 @@ import type { DB, Animal } from './types';
 const DB_KEY = 'gadocontrol_db';
 
 export const emptyDB = (): DB => ({
-  animais:     [],
-  eventos:     [],
-  lancamentos: [],
-  lotes:       [],
-  estoque:     [],
-  protocolos:  [],
-  meta:        {},
+  animais:       [],
+  eventos:       [],
+  lancamentos:   [],
+  lotes:         [],
+  estoque:       [],
+  protocolos:    [],
+  estacoesMonta: [],
+  meta:          {},
 });
 
 export function getDB(): DB {
@@ -20,13 +21,14 @@ export function getDB(): DB {
     if (!raw) return emptyDB();
     const parsed = JSON.parse(raw) as Partial<DB>;
     return {
-      animais:     parsed.animais     ?? [],
-      eventos:     parsed.eventos     ?? [],
-      lancamentos: parsed.lancamentos ?? [],
-      lotes:       parsed.lotes       ?? [],
-      estoque:     parsed.estoque     ?? [],
-      protocolos:  parsed.protocolos  ?? [],
-      meta:        parsed.meta        ?? {},
+      animais:       parsed.animais       ?? [],
+      eventos:       parsed.eventos       ?? [],
+      lancamentos:   parsed.lancamentos   ?? [],
+      lotes:         parsed.lotes         ?? [],
+      estoque:       parsed.estoque       ?? [],
+      protocolos:    parsed.protocolos    ?? [],
+      estacoesMonta: parsed.estacoesMonta ?? [],
+      meta:          parsed.meta          ?? {},
     };
   } catch {
     return emptyDB();

@@ -2,8 +2,10 @@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Printer } from 'lucide-react';
 import { CAT_ICON } from '@/lib/types';
 import { fmtDate, fmtMoney, getCabecas, idadeMeses } from '@/lib/db';
+import { imprimirAnimal } from '@/lib/exportar';
 import type { Animal, Evento } from '@/lib/types';
 
 interface Props {
@@ -74,6 +76,15 @@ export function AnimalDetail({ animal, eventos, onClose, onEdit, onNewEvento }: 
             </Section>
           )}
 
+          {/* Foto do animal */}
+          {animal.foto && (
+            <div>
+              <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-2">Foto</p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={animal.foto} alt={animal.brinco} className="w-full max-w-[200px] rounded-xl border object-cover aspect-square" />
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => onNewEvento(animal.brinco || animal.nomeGrupo || '')}
@@ -90,6 +101,14 @@ export function AnimalDetail({ animal, eventos, onClose, onEdit, onNewEvento }: 
               Editar Animal
             </button>
           </div>
+
+          <button
+            onClick={() => imprimirAnimal(animal.id)}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border font-bold text-sm text-muted-foreground hover:bg-muted transition-colors"
+          >
+            <Printer className="w-4 h-4" />
+            Imprimir Ficha do Animal
+          </button>
         </div>
       </SheetContent>
     </Sheet>

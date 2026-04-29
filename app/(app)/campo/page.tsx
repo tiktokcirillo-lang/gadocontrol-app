@@ -1,5 +1,6 @@
 'use client';
 import { useState, useMemo } from 'react';
+import Link from 'next/link';
 import { useDB } from '@/hooks/useDB';
 import { getDB, fmtDate } from '@/lib/db';
 import { EventoForm } from '@/components/animals/EventoForm';
@@ -106,6 +107,17 @@ export default function CampoPage() {
           </button>
         </div>
       )}
+
+      {/* Atalho Pesagem em Massa */}
+      <Link href="/campo/pesagem"
+        className="flex items-center gap-3 rounded-2xl border-2 border-dashed border-green-300 bg-green-50 p-4 hover:bg-green-100 transition-colors">
+        <span className="text-3xl">⚖️</span>
+        <div>
+          <p className="font-black text-sm text-green-900">Pesagem em Massa</p>
+          <p className="text-xs text-green-700">Modo campo com voz — pese vários animais rapidamente</p>
+        </div>
+        <span className="ml-auto text-green-700 font-bold text-lg">→</span>
+      </Link>
 
       {/* Grid de ações */}
       <div className="grid grid-cols-2 gap-3">

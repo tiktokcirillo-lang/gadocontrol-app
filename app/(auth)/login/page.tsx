@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Loader2, Hash } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,18 +10,20 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Logo } from '@/components/shared/Logo';
+import { entrarComCodigo } from '@/lib/codigoPeao';
 
-type Mode = 'login' | 'register' | 'reset';
+type Mode = 'login' | 'register' | 'reset' | 'peao';
 
 export default function LoginPage() {
-  const router                    = useRouter();
+  const router = useRouter();
   const { signIn, signUp, signInGoogle, resetPassword } = useAuth();
-  const [mode,    setMode]        = useState<Mode>('login');
-  const [email,   setEmail]       = useState('');
-  const [password, setPassword]   = useState('');
-  const [name,    setName]        = useState('');
-  const [showPw,  setShowPw]      = useState(false);
-  const [loading, setLoading]     = useState(false);
+  const [mode,     setMode]    = useState<Mode>('login');
+  const [email,    setEmail]   = useState('');
+  const [password, setPassword] = useState('');
+  const [name,     setName]    = useState('');
+  const [showPw,   setShowPw]  = useState(false);
+  const [loading,  setLoading] = useState(false);
+  const [codigo,   setCodigo]  = useState('');
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,12 +31,12 @@ export default function LoginPage() {
     try {
       if (mode === 'login') {
         await signIn(email, password);
-        router.push('/app');
+        router.push('/');
       } else if (mode === 'register') {
         await signUp(email, password, name);
         toast.success('Conta criada! Bem-vindo ao GadoControl.');
-        router.push('/app');
-      } else {
+        router.push('/');
+      } else if (mode === 'reset') {
         await resetPassword(email);
         toast.success('Email de recuperação enviado!');
         setMode('login');
@@ -59,7 +61,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await signInGoogle();
-      router.push('/app');
+      router.push('/');
     } catch {
       toast.error('Erro ao entrar com Google.');
     } finally {
@@ -67,11 +69,28 @@ export default function LoginPage() {
     }
   }
 
-  return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4"
-         style={{ background: 'linear-gradient(135deg, #1a2e1a 0%, #2D6A2F 100%)' }}>
+  async function handleCodigo(e: React.FormEvent) {
+    e.preventDefault();
+    if (!codigo.trim()) { toast.error('Digite o código da fazenda.'); return; }
+    setLoading(true);
+    try {
+      await entrarComCodigo(codigo.trim());
+      toast.success('Acesso autorizado! Bem-vindo à fazenda.');
+      router.push('/');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Código inválido.');
+    } finally {
+      setLoading(false);
+    }
+  }
 
+  return (
+    <div
+      className="min-h-screen flex flex-col items-center justify-center p-4"
+      style={{ background: 'linear-gradient(135deg, #1a2e1a 0%, #2D6A2F 100%)' }}
+    >
       <div className="w-full max-w-sm space-y-6">
+
         {/* Logo */}
         <div className="text-center">
           <div className="flex justify-center mb-2">
@@ -86,6 +105,7 @@ export default function LoginPage() {
               {mode === 'login'    && 'Entrar na conta'}
               {mode === 'register' && 'Criar conta grátis'}
               {mode === 'reset'    && 'Recuperar senha'}
+              {mode === 'peao'     && 'Acesso como Peão'}
             </h2>
             {mode === 'register' && (
               <p className="text-center text-sm text-muted-foreground">
@@ -95,133 +115,181 @@ export default function LoginPage() {
           </CardHeader>
 
           <CardContent className="px-6 pb-6">
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {mode === 'register' && (
+
+            {/* ── Modo Peão ── */}
+            {mode === 'peao' && (
+              <form onSubmit={handleCodigo} className="space-y-4">
+                <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+                  <p className="font-bold">Acesso como Peão / Funcionário</p>
+                  <p className="text-xs mt-1">Peça ao proprietário o código de 6 caracteres da fazenda em Configurações → Código da Fazenda.</p>
+                </div>
                 <div className="space-y-1">
-                  <Label htmlFor="name">Nome</Label>
+                  <Label htmlFor="codigo">Código da Fazenda</Label>
                   <Input
-                    id="name"
-                    placeholder="Seu nome"
-                    value={name}
-                    onChange={e => setName(e.target.value)}
+                    id="codigo"
+                    placeholder="AB3C7Z"
+                    value={codigo}
+                    onChange={e => setCodigo(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                    maxLength={6}
+                    className="font-mono text-xl text-center tracking-[0.4em] uppercase"
                     required
                   />
                 </div>
-              )}
-
-              <div className="space-y-1">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="seu@email.com"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  required
-                  autoComplete="email"
-                />
-              </div>
-
-              {mode !== 'reset' && (
-                <div className="space-y-1">
-                  <Label htmlFor="password">Senha</Label>
-                  <div className="relative">
-                    <Input
-                      id="password"
-                      type={showPw ? 'text' : 'password'}
-                      placeholder="••••••••"
-                      value={password}
-                      onChange={e => setPassword(e.target.value)}
-                      required
-                      minLength={6}
-                      autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                      className="pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPw(v => !v)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    >
-                      {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {mode === 'login' && (
-                <div className="text-right">
-                  <button
-                    type="button"
-                    onClick={() => setMode('reset')}
-                    className="text-xs text-muted-foreground hover:text-foreground underline"
-                  >
-                    Esqueci a senha
+                <Button type="submit" className="w-full font-bold" style={{ background: '#b45309' }} disabled={loading}>
+                  {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Acessar Fazenda
+                </Button>
+                <div className="text-center text-sm">
+                  <button type="button" onClick={() => setMode('login')} className="font-semibold underline" style={{ color: '#2D6A2F' }}>
+                    ← Voltar ao login
                   </button>
                 </div>
-              )}
+              </form>
+            )}
 
-              <Button
-                type="submit"
-                className="w-full font-bold"
-                style={{ background: '#2D6A2F' }}
-                disabled={loading}
-              >
-                {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {mode === 'login'    && 'Entrar'}
-                {mode === 'register' && 'Criar conta'}
-                {mode === 'reset'    && 'Enviar email de recuperação'}
-              </Button>
-            </form>
-
-            {mode !== 'reset' && (
+            {/* ── Modos normais ── */}
+            {mode !== 'peao' && (
               <>
-                <div className="relative my-4">
-                  <Separator />
-                  <span className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
-                    ou
-                  </span>
-                </div>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  {mode === 'register' && (
+                    <div className="space-y-1">
+                      <Label htmlFor="name">Nome</Label>
+                      <Input
+                        id="name"
+                        placeholder="Seu nome"
+                        value={name}
+                        onChange={e => setName(e.target.value)}
+                        required
+                      />
+                    </div>
+                  )}
 
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={handleGoogle}
-                  disabled={loading}
-                >
-                  <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
-                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                  </svg>
-                  Continuar com Google
-                </Button>
+                  <div className="space-y-1">
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      placeholder="seu@email.com"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      required
+                      autoComplete="email"
+                    />
+                  </div>
+
+                  {mode !== 'reset' && (
+                    <div className="space-y-1">
+                      <Label htmlFor="password">Senha</Label>
+                      <div className="relative">
+                        <Input
+                          id="password"
+                          type={showPw ? 'text' : 'password'}
+                          placeholder="••••••••"
+                          value={password}
+                          onChange={e => setPassword(e.target.value)}
+                          required
+                          minLength={6}
+                          autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                          className="pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPw(v => !v)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        >
+                          {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {mode === 'login' && (
+                    <div className="text-right">
+                      <button
+                        type="button"
+                        onClick={() => setMode('reset')}
+                        className="text-xs text-muted-foreground hover:text-foreground underline"
+                      >
+                        Esqueci a senha
+                      </button>
+                    </div>
+                  )}
+
+                  <Button
+                    type="submit"
+                    className="w-full font-bold"
+                    style={{ background: '#2D6A2F' }}
+                    disabled={loading}
+                  >
+                    {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {mode === 'login'    && 'Entrar'}
+                    {mode === 'register' && 'Criar conta'}
+                    {mode === 'reset'    && 'Enviar email de recuperação'}
+                  </Button>
+                </form>
+
+                {mode !== 'reset' && (
+                  <>
+                    <div className="relative my-4">
+                      <Separator />
+                      <span className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
+                        ou
+                      </span>
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={handleGoogle}
+                      disabled={loading}
+                    >
+                      <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
+                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                      </svg>
+                      Continuar com Google
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      className="w-full mt-2 border-amber-300 text-amber-800 hover:bg-amber-50"
+                      onClick={() => setMode('peao')}
+                      disabled={loading}
+                    >
+                      <Hash className="mr-2 h-4 w-4" />
+                      Acessar com código (peão)
+                    </Button>
+                  </>
+                )}
+
+                <div className="mt-4 text-center text-sm">
+                  {mode === 'login' && (
+                    <span>
+                      Não tem conta?{' '}
+                      <button onClick={() => setMode('register')} className="font-semibold underline" style={{ color: '#2D6A2F' }}>
+                        Criar grátis
+                      </button>
+                    </span>
+                  )}
+                  {mode === 'register' && (
+                    <span>
+                      Já tem conta?{' '}
+                      <button onClick={() => setMode('login')} className="font-semibold underline" style={{ color: '#2D6A2F' }}>
+                        Entrar
+                      </button>
+                    </span>
+                  )}
+                  {mode === 'reset' && (
+                    <button onClick={() => setMode('login')} className="font-semibold underline" style={{ color: '#2D6A2F' }}>
+                      Voltar para o login
+                    </button>
+                  )}
+                </div>
               </>
             )}
 
-            <div className="mt-4 text-center text-sm">
-              {mode === 'login' && (
-                <span>
-                  Não tem conta?{' '}
-                  <button onClick={() => setMode('register')} className="font-semibold underline" style={{ color: '#2D6A2F' }}>
-                    Criar grátis
-                  </button>
-                </span>
-              )}
-              {mode === 'register' && (
-                <span>
-                  Já tem conta?{' '}
-                  <button onClick={() => setMode('login')} className="font-semibold underline" style={{ color: '#2D6A2F' }}>
-                    Entrar
-                  </button>
-                </span>
-              )}
-              {mode === 'reset' && (
-                <button onClick={() => setMode('login')} className="font-semibold underline" style={{ color: '#2D6A2F' }}>
-                  Voltar para o login
-                </button>
-              )}
-            </div>
           </CardContent>
         </Card>
 

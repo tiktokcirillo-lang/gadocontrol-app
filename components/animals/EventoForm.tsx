@@ -6,6 +6,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { VoiceButton } from '@/components/shared/VoiceButton';
 import { useDB } from '@/hooks/useDB';
 import { uid, today } from '@/lib/db';
 import { aplicarEfeitos } from '@/lib/eventos';
@@ -249,8 +250,14 @@ export function EventoForm({ open, eventoId, brincoFixed, tipoFixed, onClose }: 
           {/* Peso */}
           {showPeso && (
             <Field label="Peso (kg)">
-              <Input type="number" step="0.1" min="0" placeholder="0.0"
-                value={form.peso} onChange={e => set('peso', e.target.value)} />
+              <div className="flex gap-2 items-center">
+                <Input type="number" step="0.1" min="0" placeholder="0.0"
+                  value={form.peso} onChange={e => set('peso', e.target.value)} />
+                <VoiceButton onResult={t => {
+                  const num = t.replace(/[^\d,.]/g, '').replace(',', '.');
+                  if (num) set('peso', num);
+                }} />
+              </div>
             </Field>
           )}
 
@@ -375,9 +382,12 @@ export function EventoForm({ open, eventoId, brincoFixed, tipoFixed, onClose }: 
 
           {/* Detalhes */}
           <Field label="Detalhes / Observação">
-            <textarea rows={2} placeholder="Descreva o evento..."
-              value={form.detalhes} onChange={e => set('detalhes', e.target.value)}
-              className="w-full border rounded-md px-3 py-2 text-sm bg-background resize-none" />
+            <div className="flex gap-2 items-start">
+              <textarea rows={2} placeholder="Descreva o evento..."
+                value={form.detalhes} onChange={e => set('detalhes', e.target.value)}
+                className="flex-1 border rounded-md px-3 py-2 text-sm bg-background resize-none" />
+              <VoiceButton onResult={t => set('detalhes', t)} />
+            </div>
           </Field>
 
           <Button className="w-full font-bold h-11" style={{ background: '#2D6A2F' }}

@@ -6,6 +6,8 @@ import { BottomNav } from '@/components/layout/BottomNav';
 import { AppHeader } from '@/components/layout/AppHeader';
 import { OnboardingTour } from '@/components/onboarding/OnboardingTour';
 import { getDB } from '@/lib/db';
+import { getPeaoOwner } from '@/lib/codigoPeao';
+import { verificarAlertasSaude } from '@/lib/pushNotifications';
 import { Loader2 } from 'lucide-react';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -22,8 +24,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   useEffect(() => {
-    if (!loading && !user) router.replace('/login');
+    // Permite acesso de peões (anon auth) ou bloqueados sem auth
+    const isPeao = !!getPeaoOwner();
+    if (!loading && !user && !isPeao) router.replace('/login');
   }, [user, loading, router]);
+
+  // Verifica alertas sanitários na inicialização (apenas uma vez)
+  useEffect(() => {
+    if (!user) return;
+    const db = getDB();
+    // Delay para não travar o render inicial
+    const t = setTimeout(() => void verificarAlertasSaude(db), 5000);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (loading) {
     return (

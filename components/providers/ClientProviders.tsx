@@ -1,5 +1,6 @@
 'use client';
 import dynamic from 'next/dynamic';
+import { ThemeProvider } from 'next-themes';
 import { Toaster } from '@/components/ui/sonner';
 import { ServiceWorkerRegistrar } from '@/components/shared/ServiceWorkerRegistrar';
 
@@ -13,10 +14,12 @@ const AuthProvider = dynamic(
 
 export function ClientProviders({ children }: { children: React.ReactNode }) {
   return (
-    <AuthProvider>
-      {children}
-      <Toaster richColors position="top-center" />
-      <ServiceWorkerRegistrar />
-    </AuthProvider>
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+      <AuthProvider>
+        {children}
+        <Toaster richColors position="top-center" />
+        <ServiceWorkerRegistrar />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

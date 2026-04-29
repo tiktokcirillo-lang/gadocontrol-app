@@ -1,6 +1,7 @@
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
+import { getStorage, type FirebaseStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey:            process.env.NEXT_PUBLIC_FIREBASE_API_KEY            ?? '',
@@ -21,7 +22,8 @@ function initFirebase(): FirebaseApp {
 const isBrowser = typeof window !== 'undefined';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const app: FirebaseApp       = isBrowser ? initFirebase() : {} as any;
-export const auth: Auth      = isBrowser ? getAuth(app)      : {} as Auth;
-export const db:   Firestore = isBrowser ? getFirestore(app) : {} as Firestore;
+const app: FirebaseApp            = isBrowser ? initFirebase()       : {} as any;
+export const auth: Auth           = isBrowser ? getAuth(app)         : {} as Auth;
+export const db:   Firestore      = isBrowser ? getFirestore(app)    : {} as Firestore;
+export const storage: FirebaseStorage = isBrowser ? getStorage(app)  : {} as FirebaseStorage;
 export default app;

@@ -188,7 +188,19 @@ export interface DB {
   lotes: Lote[];
   estoque: EstoqueItem[];
   protocolos: ProtocoloSanitario[];
+  estacoesMonta: EstacaoMonta[];
   meta: Meta;
+}
+
+export interface EstacaoMonta {
+  id: string;
+  nome: string;
+  dataInicio: string;
+  dataFim: string;
+  touros: string[];        // IDs or brincos
+  matrizesIds: string[];   // IDs
+  obs?: string;
+  createdAt: string;
 }
 
 export type UserPlan = 'free' | 'pro';

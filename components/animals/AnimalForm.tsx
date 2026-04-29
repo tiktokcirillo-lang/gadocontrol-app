@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Loader2, X } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,6 +11,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
+import { VoiceButton } from '@/components/shared/VoiceButton';
+import { PhotoCapture } from '@/components/shared/PhotoCapture';
 import { useDB } from '@/hooks/useDB';
 import { useAuth } from '@/contexts/AuthContext';
 import { uid, today, sumCabecas } from '@/lib/db';
@@ -39,13 +41,13 @@ function emptyForm() {
     brinco: '', nomeGrupo: '', qtdCabecas: '', categoria: '' as AnimalCategoria | '',
     sexo: '' as AnimalSexo | '', raca: '', dataNascimento: '', pesoAtual: '',
     pesoMedio: '', mae: '', pai: '', observacao: '', status: 'Vivo' as Animal['status'],
-    sisbov: '', gta: '', marcaFogo: '', corteOrelha: '',
+    sisbov: '', gta: '', marcaFogo: '', corteOrelha: '', foto: '',
   };
 }
 
 export function AnimalForm({ open, animalId, onClose }: Props) {
   const { db, update } = useDB();
-  const { plan }       = useAuth();
+  const { plan, user } = useAuth();
   const [mode,    setMode]    = useState<Mode>('individual');
   const [form,    setForm]    = useState(emptyForm());
   const [saving,  setSaving]  = useState(false);
@@ -75,6 +77,7 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
           gta:           a.gta          ?? '',
           marcaFogo:     a.marcaFogo    ?? '',
           corteOrelha:   a.corteOrelha  ?? '',
+          foto:          a.foto         ?? '',
         });
       }
     } else {
@@ -141,6 +144,7 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
             gta:           form.gta.trim()        || undefined,
             marcaFogo:     form.marcaFogo.trim()  || undefined,
             corteOrelha:   form.corteOrelha.trim()|| undefined,
+            foto:          form.foto || undefined,
             updatedAt:     now,
           };
         }
@@ -165,6 +169,7 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
           gta:           form.gta.trim()        || undefined,
           marcaFogo:     form.marcaFogo.trim()  || undefined,
           corteOrelha:   form.corteOrelha.trim()|| undefined,
+          foto:          form.foto || undefined,
           status:        'Vivo',
           createdAt:     now,
           updatedAt:     now,
@@ -213,7 +218,10 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
           {/* Identificação */}
           {mode === 'individual' ? (
             <Field label="Brinco / Identificação *">
-              <Input placeholder="Ex: A001" value={form.brinco} onChange={e => set('brinco', e.target.value)} />
+              <div className="flex gap-2 items-center">
+                <Input placeholder="Ex: A001" value={form.brinco} onChange={e => set('brinco', e.target.value)} />
+                <VoiceButton onResult={t => set('brinco', t)} />
+              </div>
             </Field>
           ) : (
             <div className="grid grid-cols-2 gap-3">
@@ -270,11 +278,17 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
 
           {/* Peso */}
           <Field label={mode === 'grupo' ? 'Peso Médio (kg)' : 'Peso Atual (kg)'}>
-            <Input
-              type="number" step="0.1" min="0" placeholder="0.0"
-              value={mode === 'grupo' ? form.pesoMedio : form.pesoAtual}
-              onChange={e => set(mode === 'grupo' ? 'pesoMedio' : 'pesoAtual', e.target.value)}
-            />
+            <div className="flex gap-2 items-center">
+              <Input
+                type="number" step="0.1" min="0" placeholder="0.0"
+                value={mode === 'grupo' ? form.pesoMedio : form.pesoAtual}
+                onChange={e => set(mode === 'grupo' ? 'pesoMedio' : 'pesoAtual', e.target.value)}
+              />
+              <VoiceButton onResult={t => {
+                const num = t.replace(/[^\d,.]/g, '').replace(',', '.');
+                if (num) set(mode === 'grupo' ? 'pesoMedio' : 'pesoAtual', num);
+              }} />
+            </div>
           </Field>
 
           {/* Filiação (apenas individual) */}
@@ -319,15 +333,26 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
             </div>
           )}
 
+          {/* Foto */}
+          <PhotoCapture
+            label="Foto do Animal"
+            value={form.foto || undefined}
+            onChange={v => set('foto', v ?? '')}
+            ownerUid={user?.uid}
+          />
+
           {/* Observações */}
           <Field label="Observações">
-            <textarea
-              rows={2}
-              placeholder="Anotações sobre o animal..."
-              value={form.observacao}
-              onChange={e => set('observacao', e.target.value)}
-              className="w-full border rounded-md px-3 py-2 text-sm bg-background resize-none"
-            />
+            <div className="flex gap-2 items-start">
+              <textarea
+                rows={2}
+                placeholder="Anotações sobre o animal..."
+                value={form.observacao}
+                onChange={e => set('observacao', e.target.value)}
+                className="flex-1 border rounded-md px-3 py-2 text-sm bg-background resize-none"
+              />
+              <VoiceButton onResult={t => set('observacao', t)} />
+            </div>
           </Field>
 
           {/* Status (só edição) */}

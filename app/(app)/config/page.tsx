@@ -1,15 +1,18 @@
 'use client';
-import { useState, useRef } from 'react';
-import { Save, Download, Upload, FileText, FileJson, AlertTriangle } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Save, Download, Upload, FileText, FileJson, AlertTriangle, Copy, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDB } from '@/hooks/useDB';
+import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { exportarJSON, importarJSON, exportarCSVFinanceiro, abrirRelatorioPDF } from '@/lib/exportar';
+import { exportarJSON, importarJSON, exportarCSVFinanceiro, abrirRelatorioPDF, exportarXLSX, importarXLSX } from '@/lib/exportar';
 import { fmtDate, saveDB } from '@/lib/db';
 import { gerarDemoDB } from '@/lib/demoData';
 import { TeamManager } from '@/components/config/TeamManager';
+import { gerarCodigo, publicarCodigo } from '@/lib/codigoPeao';
+import { solicitarPermissao, permissaoAtual } from '@/lib/pushNotifications';
 
 const ESTADOS_BR = [
   'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS',
@@ -18,7 +21,34 @@ const ESTADOS_BR = [
 
 export default function ConfigPage() {
   const { db, update } = useDB();
+  const { user } = useAuth();
   const meta = db.meta ?? {};
+  const [codigoFaz, setCodigoFaz] = useState<string>('');
+  const [gerandoCod, setGerandoCod] = useState(false);
+  const [notifPerm,  setNotifPerm]  = useState<NotificationPermission>('default');
+
+  // Carrega código salvo localmente + permissão de notificações
+  useEffect(() => {
+    const saved = localStorage.getItem('gadocontrol_fazenda_codigo');
+    if (saved) setCodigoFaz(saved);
+    setNotifPerm(permissaoAtual());
+  }, []);
+
+  async function handleGerarCodigo() {
+    if (!user) { toast.error('Faça login para gerar um código.'); return; }
+    setGerandoCod(true);
+    try {
+      const code = gerarCodigo();
+      await publicarCodigo(user.uid, code);
+      localStorage.setItem('gadocontrol_fazenda_codigo', code);
+      setCodigoFaz(code);
+      toast.success('Código da fazenda gerado! Compartilhe com seus peões.');
+    } catch {
+      toast.error('Erro ao gerar código. Verifique sua conexão.');
+    } finally {
+      setGerandoCod(false);
+    }
+  }
 
   const [faz, setFaz] = useState({
     fazNome:         meta.fazNome         ?? '',
@@ -30,8 +60,10 @@ export default function ConfigPage() {
     fazIE:           meta.fazIE           ?? '',
   });
 
-  const [importing, setImporting] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [importing,      setImporting]      = useState(false);
+  const [xlsxImporting,  setXlsxImporting]  = useState(false);
+  const fileRef     = useRef<HTMLInputElement>(null);
+  const xlsxFileRef = useRef<HTMLInputElement>(null);
 
   function set(k: keyof typeof faz, v: string) {
     setFaz(f => ({ ...f, [k]: v }));
@@ -64,6 +96,24 @@ export default function ConfigPage() {
     } finally {
       setImporting(false);
       if (fileRef.current) fileRef.current.value = '';
+    }
+  }
+
+  async function handleImportXLSX(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setXlsxImporting(true);
+    try {
+      const res = await importarXLSX(file);
+      toast.success(
+        `Importação concluída: ${res.adicionados} adicionados, ${res.atualizados} atualizados.`
+      );
+      setTimeout(() => window.location.reload(), 1000);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao importar planilha.');
+    } finally {
+      setXlsxImporting(false);
+      if (xlsxFileRef.current) xlsxFileRef.current.value = '';
     }
   }
 
@@ -160,6 +210,13 @@ export default function ConfigPage() {
             cor="#7c3aed"
             onClick={() => { exportarCSVFinanceiro(); toast.success('CSV exportado!'); }}
           />
+          <ExportButton
+            icon={<Download className="h-4 w-4" />}
+            titulo="Planilha Excel (.xlsx)"
+            desc="Exporta animais, eventos, financeiro e estoque em abas separadas"
+            cor="#15803d"
+            onClick={() => { exportarXLSX(); toast.success('Planilha Excel exportada!'); }}
+          />
         </div>
       </Section>
 
@@ -212,6 +269,112 @@ export default function ConfigPage() {
             <Upload className="h-4 w-4" />
             {importing ? 'Importando...' : 'Selecionar arquivo .json de backup'}
           </button>
+        </div>
+      </Section>
+
+      {/* ── Importar Planilha XLSX ────────────────────────────────────── */}
+      <Section title="📊 Importar Planilha Excel">
+        <div className="p-4 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Importe animais a partir de uma planilha Excel (<strong>.xlsx</strong>) exportada pelo GadoControl.
+            Animais com o mesmo brinco serão <strong>atualizados</strong>; novos brincos serão <strong>adicionados</strong>.
+          </p>
+          <input
+            ref={xlsxFileRef}
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={handleImportXLSX}
+            className="hidden"
+          />
+          <button
+            onClick={() => xlsxFileRef.current?.click()}
+            disabled={xlsxImporting}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-muted-foreground/30 text-sm font-bold text-muted-foreground hover:border-green-400 hover:text-green-700 transition-colors">
+            <Upload className="h-4 w-4" />
+            {xlsxImporting ? 'Importando...' : 'Selecionar planilha .xlsx'}
+          </button>
+        </div>
+      </Section>
+
+      {/* ── Notificações ──────────────────────────────────────────────── */}
+      <Section title="🔔 Notificações">
+        <div className="p-4 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Receba alertas de saúde do rebanho, partos previstos e vacinas a vencer diretamente no celular.
+          </p>
+          {notifPerm === 'granted' ? (
+            <div className="flex items-center gap-2 rounded-xl bg-green-50 border border-green-200 p-3">
+              <span className="text-green-600 text-xl">✓</span>
+              <div>
+                <p className="text-sm font-bold text-green-800">Notificações ativas</p>
+                <p className="text-xs text-green-700">Você receberá alertas de saúde e partos.</p>
+              </div>
+            </div>
+          ) : notifPerm === 'denied' ? (
+            <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-800">
+              <p className="font-bold">Notificações bloqueadas</p>
+              <p className="text-xs mt-1">Ative nas configurações do seu navegador/dispositivo.</p>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              className="w-full border-green-300 text-green-800 hover:bg-green-50"
+              onClick={async () => {
+                const perm = await solicitarPermissao();
+                setNotifPerm(perm);
+                if (perm === 'granted') toast.success('Notificações ativadas!');
+              }}
+            >
+              🔔 Ativar notificações
+            </Button>
+          )}
+        </div>
+      </Section>
+
+      {/* ── Código da Fazenda (Peão) ──────────────────────────────────── */}
+      <Section title="🔑 Código da Fazenda">
+        <div className="p-4 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Gere um código de 6 caracteres para que peões e funcionários acessem os dados da fazenda
+            sem precisar de e-mail ou conta Google.
+          </p>
+
+          {codigoFaz ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 rounded-xl border-2 border-green-200 bg-green-50 p-4">
+                <span className="text-3xl font-black font-mono tracking-[0.3em] text-green-900 select-all">
+                  {codigoFaz}
+                </span>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(codigoFaz); toast.success('Código copiado!'); }}
+                  className="ml-auto p-2 rounded-lg border border-green-300 text-green-700 hover:bg-green-100 transition-colors"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Compartilhe este código com seus peões. Eles acessam pela tela de login → &quot;Acessar com código&quot;.
+              </p>
+              <button
+                onClick={handleGerarCodigo}
+                disabled={gerandoCod}
+                className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground underline"
+              >
+                <RefreshCw className="w-3 h-3" />
+                {gerandoCod ? 'Gerando...' : 'Gerar novo código'}
+              </button>
+            </div>
+          ) : (
+            <Button
+              className="w-full font-bold"
+              style={{ background: '#b45309' }}
+              onClick={handleGerarCodigo}
+              disabled={gerandoCod}
+            >
+              {gerandoCod ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : '🔑 '}
+              Gerar Código da Fazenda
+            </Button>
+          )}
         </div>
       </Section>
 

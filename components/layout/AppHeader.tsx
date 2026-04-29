@@ -9,12 +9,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { LogOut, Settings, Crown, Download } from 'lucide-react';
+import { LogOut, Settings, Crown, Download, Sun, Moon } from 'lucide-react';
 import { exportarJSON } from '@/lib/exportar';
 import { toast } from 'sonner';
+import { useTheme } from 'next-themes';
 
 export function AppHeader() {
   const { user, logOut, plan, inTrial, trialDaysLeft } = useAuth();
+  const { theme, setTheme } = useTheme();
 
   const initial = (user?.displayName ?? user?.email ?? 'U')[0].toUpperCase();
 
@@ -24,6 +26,14 @@ export function AppHeader() {
         <Logo size="sm" />
 
         <div className="flex items-center gap-2">
+          {/* Tema claro/escuro */}
+          <button
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors"
+            aria-label="Alternar tema">
+            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
+
           {plan === 'pro' ? (
             <Badge className="text-xs font-bold" style={{ background: '#2D6A2F' }}>
               <Crown size={10} className="mr-1" /> PRO

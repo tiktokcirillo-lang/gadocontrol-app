@@ -3,7 +3,7 @@ import { useState, useMemo } from 'react';
 import { Plus, ShieldCheck, Activity, FlaskConical, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDB } from '@/hooks/useDB';
-import { diffDays, fmtDate, today, uid } from '@/lib/db';
+import { addDias, diffDays, fmtDate, today, uid } from '@/lib/db';
 import { EventoForm } from '@/components/animals/EventoForm';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -27,7 +27,7 @@ function getBrinco(a: Animal) {
   return a.brinco || a.nomeGrupo || '—';
 }
 
-type SaudeTab = 'alertas' | 'protocolos';
+type SaudeTab = 'alertas' | 'calendario' | 'protocolos';
 
 export default function SaudePage() {
   const { db } = useDB();
@@ -122,9 +122,10 @@ export default function SaudePage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex rounded-lg border p-1 gap-1">
+      <div className="grid grid-cols-3 rounded-lg border p-1 gap-1">
         {([
           { key: 'alertas',    label: '🚨 Alertas'    },
+          { key: 'calendario', label: '📅 Calendário'  },
           { key: 'protocolos', label: '🔬 Protocolos' },
         ] as { key: SaudeTab; label: string }[]).map(t => (
           <button key={t.key} onClick={() => setSaudeTab(t.key)}
@@ -136,6 +137,7 @@ export default function SaudePage() {
       </div>
 
       {saudeTab === 'protocolos' && <TabProtocolos db={db} onAbrirEvento={abrirEvento} />}
+      {saudeTab === 'calendario' && <TabCalendario db={db} onAbrirEvento={abrirEvento} />}
       {saudeTab === 'alertas' && <>
 
       {/* KPIs */}
@@ -278,6 +280,167 @@ export default function SaudePage() {
         tipoFixed={tipoFixed}
         onClose={fecharEvento}
       />
+    </div>
+  );
+}
+
+// ─── Aba Calendário Sanitário ────────────────────────────────────────────────
+
+function TabCalendario({
+  db, onAbrirEvento,
+}: {
+  db: ReturnType<typeof useDB>['db'];
+  onAbrirEvento: (brinco?: string, tipo?: EventoTipo) => void;
+}) {
+  const hoje = today();
+  const animaisVivos = (db.animais ?? []).filter(a => a.status === 'Vivo');
+  const protocolos   = db.protocolos ?? [];
+
+  // Mapa: brinco → tipo → última data
+  const lastEvMap = useMemo(() => {
+    const m: Record<string, Record<string, string>> = {};
+    (db.eventos ?? []).forEach(e => {
+      if (!m[e.brincoAnimal]) m[e.brincoAnimal] = {};
+      const prev = m[e.brincoAnimal][e.tipo];
+      if (!prev || e.data > prev) m[e.brincoAnimal][e.tipo] = e.data;
+    });
+    return m;
+  }, [db]);
+
+  // Gera eventos futuros com base nos protocolos (próximos 90 dias)
+  interface EventoAgendado {
+    dataEsperada: string;
+    tipo: EventoTipo;
+    protocolo: string;
+    animais: typeof animaisVivos;
+    diasRestantes: number;
+  }
+
+  const agenda = useMemo((): EventoAgendado[] => {
+    const eventos: EventoAgendado[] = [];
+
+    for (const p of protocolos) {
+      const animaisProtocolo = animaisVivos.filter(a => p.categorias.includes(a.categoria));
+      for (const animal of animaisProtocolo) {
+        const b      = animal.brinco || animal.nomeGrupo || '';
+        const ultimo = lastEvMap[b]?.[p.tipo];
+        let   proxData: string;
+
+        if (ultimo) {
+          // Próxima aplicação = último + intervalo
+          proxData = addDias(ultimo, p.intervaloDias);
+        } else {
+          // Nunca aplicado — está vencido
+          proxData = hoje;
+        }
+
+        const diasRestantes = diffDays(hoje, proxData);
+
+        // Só mostra eventos nos próximos 90 dias (ou vencidos até 30 dias atrás)
+        if (diasRestantes >= -30 && diasRestantes <= 90) {
+          // Agrupa por data + tipo
+          const key = `${proxData}-${p.tipo}`;
+          const existing = eventos.find(e => e.dataEsperada === proxData && e.tipo === p.tipo);
+          if (existing) {
+            existing.animais.push(animal);
+          } else {
+            eventos.push({
+              dataEsperada: proxData,
+              tipo: p.tipo as EventoTipo,
+              protocolo: p.nome,
+              animais: [animal],
+              diasRestantes,
+            });
+          }
+        }
+      }
+    }
+
+    return eventos.sort((a, b) => a.dataEsperada.localeCompare(b.dataEsperada));
+  }, [db, animaisVivos, lastEvMap, hoje]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const vencidos  = agenda.filter(e => e.diasRestantes < 0);
+  const hoje_     = agenda.filter(e => e.diasRestantes === 0);
+  const proximos  = agenda.filter(e => e.diasRestantes > 0 && e.diasRestantes <= 30);
+  const futuros   = agenda.filter(e => e.diasRestantes > 30);
+
+  if (protocolos.length === 0) {
+    return (
+      <div className="rounded-xl border bg-card p-8 text-center space-y-2">
+        <p className="text-2xl">📅</p>
+        <p className="text-sm font-bold">Sem protocolos cadastrados</p>
+        <p className="text-xs text-muted-foreground">
+          Cadastre protocolos sanitários na aba Protocolos para ver o calendário.
+        </p>
+      </div>
+    );
+  }
+
+  function GrupoAgenda({ titulo, items, corBadge }: {
+    titulo: string;
+    items: typeof agenda;
+    corBadge: string;
+  }) {
+    if (items.length === 0) return null;
+    return (
+      <div className="space-y-2">
+        <p className="text-[11px] font-black text-muted-foreground uppercase tracking-widest">{titulo}</p>
+        <div className="rounded-xl border bg-card divide-y overflow-hidden">
+          {items.map((ev, i) => (
+            <div key={i} className="flex items-start gap-3 px-4 py-3">
+              <div className={`text-[10px] font-black px-2 py-1 rounded-full mt-0.5 shrink-0 ${corBadge}`}>
+                {ev.diasRestantes < 0
+                  ? `${Math.abs(ev.diasRestantes)}d atraso`
+                  : ev.diasRestantes === 0
+                  ? 'HOJE'
+                  : `em ${ev.diasRestantes}d`}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold truncate">{ev.tipo}</p>
+                <p className="text-xs text-muted-foreground">{fmtDate(ev.dataEsperada)} · {ev.animais.length} animal(is)</p>
+              </div>
+              <button
+                onClick={() => onAbrirEvento(undefined, ev.tipo)}
+                className="shrink-0 text-[11px] font-bold px-2.5 py-1 rounded-lg border text-muted-foreground hover:bg-muted"
+              >
+                Registrar
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Resumo */}
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-xl border bg-red-50 border-red-200 p-3">
+          <p className="text-base font-black text-red-700">{vencidos.length}</p>
+          <p className="text-xs text-red-600">Vencidos</p>
+        </div>
+        <div className="rounded-xl border bg-amber-50 border-amber-200 p-3">
+          <p className="text-base font-black text-amber-700">{hoje_.length + proximos.length}</p>
+          <p className="text-xs text-amber-600">Próximos 30d</p>
+        </div>
+        <div className="rounded-xl border bg-green-50 border-green-200 p-3">
+          <p className="text-base font-black text-green-700">{futuros.length}</p>
+          <p className="text-xs text-green-600">Futuros</p>
+        </div>
+      </div>
+
+      <GrupoAgenda titulo="🔴 Vencidos" items={vencidos} corBadge="bg-red-100 text-red-700" />
+      <GrupoAgenda titulo="🟡 Hoje / Próximos 30 dias" items={[...hoje_, ...proximos]} corBadge="bg-amber-100 text-amber-700" />
+      <GrupoAgenda titulo="🟢 Futuros (31–90 dias)" items={futuros} corBadge="bg-green-100 text-green-700" />
+
+      {agenda.length === 0 && (
+        <div className="rounded-xl border bg-card p-8 text-center">
+          <p className="text-2xl mb-2">✅</p>
+          <p className="text-sm font-bold">Calendário limpo!</p>
+          <p className="text-xs text-muted-foreground mt-1">Nenhum evento sanitário agendado nos próximos 90 dias.</p>
+        </div>
+      )}
     </div>
   );
 }

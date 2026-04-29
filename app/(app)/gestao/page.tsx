@@ -1,6 +1,6 @@
 'use client';
 import { useState, useMemo } from 'react';
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Save } from 'lucide-react';
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Save, Heart } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDB } from '@/hooks/useDB';
 import { addDias, diffDays, fmtDate, today, uid } from '@/lib/db';
@@ -9,9 +9,9 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { CAT_ICON } from '@/lib/types';
-import type { AnimalCategoria } from '@/lib/types';
+import type { AnimalCategoria, EstacaoMonta } from '@/lib/types';
 
-type Tab = 'ciclos' | 'iatf' | 'lotes' | 'metas';
+type Tab = 'ciclos' | 'iatf' | 'em' | 'lotes' | 'metas';
 
 // Dias esperados de cada etapa a partir do D0
 const IATF_DIAS = { D8: 8, D17: 17, IA: 19 };
@@ -25,10 +25,11 @@ export default function GestaoPage() {
       <h1 className="text-xl font-black">Gestão</h1>
 
       {/* Tabs */}
-      <div className="grid grid-cols-4 rounded-lg border p-1 gap-1">
+      <div className="grid grid-cols-5 rounded-lg border p-1 gap-1">
         {([
           { key: 'ciclos', label: '🔄 Ciclos' },
           { key: 'iatf',   label: '🔬 IATF'   },
+          { key: 'em',     label: '❤️ EM'      },
           { key: 'lotes',  label: '🌿 Lotes'  },
           { key: 'metas',  label: '🎯 Metas'  },
         ] as { key: Tab; label: string }[]).map(t => (
@@ -42,6 +43,7 @@ export default function GestaoPage() {
 
       {tab === 'ciclos' && <TabCiclos db={db} />}
       {tab === 'iatf'   && <TabIATF   db={db} />}
+      {tab === 'em'     && <TabEstacaoMonta db={db} />}
       {tab === 'lotes'  && <TabLotes  db={db} />}
       {tab === 'metas'  && <TabMetas  db={db} />}
     </div>
@@ -689,6 +691,232 @@ function TabMetas({ db }: { db: ReturnType<typeof useDB>['db'] }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Aba Estação de Monta ────────────────────────────────────────────────────
+
+function TabEstacaoMonta({ db }: { db: ReturnType<typeof useDB>['db'] }) {
+  const { update } = useDB();
+  const hoje = today();
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [editId,    setEditId]    = useState<string | null>(null);
+  const [nome,      setNome]      = useState('');
+  const [dataIni,   setDataIni]   = useState(hoje);
+  const [dataFim,   setDataFim]   = useState('');
+  const [touros,    setTouros]    = useState<string[]>([]);
+  const [selMatz,   setSelMatz]   = useState<string[]>([]);
+  const [obs,       setObs]       = useState('');
+
+  const estacoes  = db.estacoesMonta ?? [];
+  const matrizes  = (db.animais ?? []).filter(a => a.status === 'Vivo' && a.categoria === 'Matriz');
+  const tourosDB  = (db.animais ?? []).filter(a => a.status === 'Vivo' && a.categoria === 'Touro');
+
+  function abrirForm(em?: EstacaoMonta) {
+    if (em) {
+      setEditId(em.id); setNome(em.nome); setDataIni(em.dataInicio);
+      setDataFim(em.dataFim); setTouros(em.touros); setSelMatz(em.matrizesIds); setObs(em.obs ?? '');
+    } else {
+      setEditId(null); setNome(''); setDataIni(hoje); setDataFim('');
+      setTouros([]); setSelMatz([]); setObs('');
+    }
+    setSheetOpen(true);
+  }
+
+  function salvar() {
+    if (!nome.trim()) { toast.error('Informe o nome.'); return; }
+    if (!dataIni || !dataFim) { toast.error('Informe as datas.'); return; }
+    update(d => {
+      if (!d.estacoesMonta) d.estacoesMonta = [];
+      const item: EstacaoMonta = {
+        id: editId ?? uid(), nome: nome.trim(),
+        dataInicio: dataIni, dataFim, touros, matrizesIds: selMatz,
+        obs: obs.trim() || undefined, createdAt: editId ? (d.estacoesMonta.find(x => x.id === editId)?.createdAt ?? new Date().toISOString()) : new Date().toISOString(),
+      };
+      if (editId) {
+        const idx = d.estacoesMonta.findIndex(x => x.id === editId);
+        if (idx !== -1) d.estacoesMonta[idx] = item;
+        toast.success('Estação de Monta atualizada!');
+      } else {
+        d.estacoesMonta.push(item);
+        toast.success('Estação de Monta criada!');
+      }
+    });
+    setSheetOpen(false);
+  }
+
+  function deletar(id: string) {
+    if (!confirm('Remover esta Estação de Monta?')) return;
+    update(d => { d.estacoesMonta = (d.estacoesMonta ?? []).filter(x => x.id !== id); });
+    toast.success('Estação de Monta removida.');
+  }
+
+  function status(em: EstacaoMonta): 'ativa' | 'futura' | 'encerrada' {
+    if (hoje < em.dataInicio) return 'futura';
+    if (hoje > em.dataFim) return 'encerrada';
+    return 'ativa';
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">{estacoes.length} estação(ões)</p>
+        <button onClick={() => abrirForm()}
+          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold text-white"
+          style={{ background: '#2D6A2F' }}>
+          <Plus className="h-3.5 w-3.5" /> Nova EM
+        </button>
+      </div>
+
+      {estacoes.length === 0 && (
+        <div className="rounded-xl border bg-card p-6 text-center space-y-1">
+          <Heart className="h-8 w-8 text-muted-foreground mx-auto" />
+          <p className="text-sm font-bold">Nenhuma Estação de Monta cadastrada</p>
+          <p className="text-xs text-muted-foreground">
+            Crie uma EM para registrar o período de reprodução e acompanhar resultados.
+          </p>
+        </div>
+      )}
+
+      {estacoes.sort((a, b) => b.dataInicio.localeCompare(a.dataInicio)).map(em => {
+        const st = status(em);
+        const dias = diffDays(em.dataInicio, em.dataFim);
+        const stColor = st === 'ativa' ? 'bg-green-100 text-green-800' : st === 'futura' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600';
+        const matrizes_ = (db.animais ?? []).filter(a => em.matrizesIds.includes(a.id));
+        return (
+          <div key={em.id} className="rounded-xl border bg-card overflow-hidden">
+            <div className="flex items-center gap-3 px-4 py-3 border-b bg-muted/20">
+              <div className="flex-1 min-w-0">
+                <p className="font-black text-sm truncate">{em.nome}</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {fmtDate(em.dataInicio)} → {fmtDate(em.dataFim)} · {dias}d
+                </p>
+              </div>
+              <span className={`text-[10px] font-black px-2 py-1 rounded-full ${stColor}`}>
+                {st === 'ativa' ? 'ATIVA' : st === 'futura' ? 'FUTURA' : 'ENCERRADA'}
+              </span>
+              <button onClick={() => abrirForm(em)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted">
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+              <button onClick={() => deletar(em.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 hover:bg-red-50">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-px bg-border">
+              <div className="bg-card text-center py-3">
+                <p className="font-black text-sm">{matrizes_.length}</p>
+                <p className="text-[10px] text-muted-foreground">Matrizes</p>
+              </div>
+              <div className="bg-card text-center py-3">
+                <p className="font-black text-sm">{em.touros.length}</p>
+                <p className="text-[10px] text-muted-foreground">Touros</p>
+              </div>
+              <div className="bg-card text-center py-3">
+                <p className="font-black text-sm">
+                  {matrizes_.filter(a => a.statusReprodutivo === 'Prenhe').length}
+                </p>
+                <p className="text-[10px] text-muted-foreground">Prenhas</p>
+              </div>
+            </div>
+            {em.obs && (
+              <p className="px-4 py-2 text-xs text-muted-foreground border-t">{em.obs}</p>
+            )}
+          </div>
+        );
+      })}
+
+      <Sheet open={sheetOpen} onOpenChange={v => !v && setSheetOpen(false)}>
+        <SheetContent side="bottom" className="max-h-[92vh] overflow-y-auto rounded-t-2xl">
+          <SheetHeader className="pb-3">
+            <SheetTitle>{editId ? 'Editar Estação de Monta' : 'Nova Estação de Monta'}</SheetTitle>
+          </SheetHeader>
+          <div className="space-y-4 pb-8">
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Nome *</Label>
+              <Input placeholder="Ex: EM 2025 Lote Norte" value={nome} onChange={e => setNome(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Início *</Label>
+                <Input type="date" value={dataIni} onChange={e => setDataIni(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fim *</Label>
+                <Input type="date" value={dataFim} onChange={e => setDataFim(e.target.value)} />
+              </div>
+            </div>
+
+            {/* Touros */}
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Touros</Label>
+              {tourosDB.length > 0 ? (
+                <div className="rounded-xl border divide-y max-h-32 overflow-y-auto">
+                  {tourosDB.map(t => (
+                    <label key={t.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40">
+                      <input type="checkbox"
+                        checked={touros.includes(t.brinco || t.nomeGrupo || t.id)}
+                        onChange={e => {
+                          const key = t.brinco || t.nomeGrupo || t.id;
+                          if (e.target.checked) setTouros(s => [...s, key]);
+                          else setTouros(s => s.filter(x => x !== key));
+                        }}
+                        className="w-4 h-4"
+                      />
+                      <span className="text-sm font-bold">{t.brinco || t.nomeGrupo}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <Input placeholder="Nomes dos touros (separados por vírgula)"
+                  value={touros.join(', ')}
+                  onChange={e => setTouros(e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                />
+              )}
+            </div>
+
+            {/* Matrizes */}
+            {matrizes.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Matrizes ({selMatz.length} selecionadas)
+                  </Label>
+                  <button className="text-xs underline" style={{ color: '#2D6A2F' }}
+                    onClick={() => setSelMatz(selMatz.length === matrizes.length ? [] : matrizes.map(m => m.id))}>
+                    {selMatz.length === matrizes.length ? 'Desmarcar todas' : 'Selecionar todas'}
+                  </button>
+                </div>
+                <div className="rounded-xl border divide-y max-h-40 overflow-y-auto">
+                  {matrizes.map(m => (
+                    <label key={m.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40">
+                      <input type="checkbox" checked={selMatz.includes(m.id)}
+                        onChange={e => {
+                          if (e.target.checked) setSelMatz(s => [...s, m.id]);
+                          else setSelMatz(s => s.filter(x => x !== m.id));
+                        }}
+                        className="w-4 h-4"
+                      />
+                      <span className="text-sm font-bold">{m.brinco || m.nomeGrupo}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Observações</Label>
+              <textarea rows={2} placeholder="Notas sobre a estação de monta..."
+                value={obs} onChange={e => setObs(e.target.value)}
+                className="w-full border rounded-md px-3 py-2 text-sm bg-background resize-none" />
+            </div>
+
+            <Button className="w-full font-bold h-11" style={{ background: '#2D6A2F' }} onClick={salvar}>
+              {editId ? 'Salvar Alterações' : 'Criar Estação de Monta'}
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

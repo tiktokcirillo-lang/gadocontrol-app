@@ -9,7 +9,7 @@ import { fmtMoney, fmtDate, diffDays, getCabecas, sumCabecas } from '@/lib/db';
 import { CAT_ICON } from '@/lib/types';
 import type { AnimalCategoria } from '@/lib/types';
 
-type Tab = 'rebanho' | 'desempenho' | 'curva' | 'vendas';
+type Tab = 'rebanho' | 'desempenho' | 'curva' | 'vendas' | 'projecao' | 'lotes';
 
 const CORES_CAT: Record<string, string> = {
   Bezerro:   '#f59e0b',
@@ -44,16 +44,18 @@ export default function RelatoriosPage() {
     <div className="px-4 pt-4 pb-24 space-y-4 max-w-xl mx-auto">
       <h1 className="text-xl font-black">Relatórios</h1>
 
-      {/* Tabs */}
-      <div className="grid grid-cols-4 rounded-lg border p-1 gap-1">
+      {/* Tabs — scrollável horizontal para acomodar 6 tabs */}
+      <div className="flex gap-1 overflow-x-auto rounded-lg border p-1 scrollbar-none">
         {([
           { key: 'rebanho',    label: '🐄 Rebanho'   },
           { key: 'desempenho', label: '📈 GMD'        },
           { key: 'curva',      label: '📊 Curva'      },
           { key: 'vendas',     label: '💰 Vendas'     },
+          { key: 'projecao',   label: '🔮 Projeção'   },
+          { key: 'lotes',      label: '🗂 Lotes'      },
         ] as { key: Tab; label: string }[]).map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            className={`rounded-md py-2 text-[11px] font-bold transition-colors ${tab === t.key ? 'text-white' : 'text-muted-foreground'}`}
+            className={`shrink-0 rounded-md px-3 py-2 text-[11px] font-bold transition-colors ${tab === t.key ? 'text-white' : 'text-muted-foreground'}`}
             style={tab === t.key ? { background: '#2D6A2F' } : {}}>
             {t.label}
           </button>
@@ -64,6 +66,8 @@ export default function RelatoriosPage() {
       {tab === 'desempenho' && <TabDesempenho db={db} />}
       {tab === 'curva'      && <TabCurva      db={db} />}
       {tab === 'vendas'     && <TabVendas     db={db} />}
+      {tab === 'projecao'   && <TabProjecao   db={db} />}
+      {tab === 'lotes'      && <TabLotes      db={db} />}
     </div>
   );
 }
@@ -567,6 +571,319 @@ function TabVendas({ db }: { db: ReturnType<typeof useDB>['db'] }) {
             </div>
           </Section>
         </>
+      )}
+    </div>
+  );
+}
+
+// ─── Aba Projeção de Receita ─────────────────────────────────────────────────
+
+function TabProjecao({ db }: { db: ReturnType<typeof useDB>['db'] }) {
+  const meta         = db.meta ?? {};
+  const pesoAlvo     = meta.pesoAlvoVenda ?? 480;
+  const precoArroba  = meta.precoArroba ?? 0;
+  const ARROBA_KG    = 15;
+  const RENDIMENTO   = 0.5; // rendimento de carcaça ~50%
+
+  const animaisVivos = (db.animais ?? []).filter(a => a.status === 'Vivo');
+  const novilhos     = animaisVivos.filter(a =>
+    (a.categoria === 'Novilho' || a.categoria === 'Boi') && a.pesoAtual
+  );
+  const matrizes = animaisVivos.filter(a => a.categoria === 'Matriz');
+
+  // Animais prontos agora
+  const prontos = novilhos.filter(a => (a.pesoAtual ?? 0) >= pesoAlvo);
+  // Animais próximos (≥ 90% do alvo) com GMD médio estimado
+  const GMD_MEDIO = 0.8; // kg/dia estimado
+
+  // Projeção mensal dos próximos 6 meses
+  interface ProjMes { mes: string; receita: number; qtd: number }
+  const projMeses: ProjMes[] = Array.from({ length: 6 }, (_, i) => {
+    const d   = new Date();
+    d.setMonth(d.getMonth() + i);
+    const label = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][d.getMonth()] + '/' + String(d.getFullYear()).slice(2);
+    const diasFuturos = i * 30;
+
+    const prontosMes = novilhos.filter(a => {
+      const pesoFuturo = (a.pesoAtual ?? 0) + GMD_MEDIO * diasFuturos;
+      const pesoAtual_ = (a.pesoAtual ?? 0);
+      return pesoFuturo >= pesoAlvo && pesoAtual_ < pesoAlvo; // ainda não vendido
+    });
+
+    // Adiciona os prontos agora ao mês 0
+    const totalQtd    = i === 0 ? prontos.length : prontosMes.length;
+    const totalPeso   = i === 0
+      ? prontos.reduce((s, a) => s + (a.pesoAtual ?? 0), 0)
+      : prontosMes.reduce((s, a) => s + Math.min((a.pesoAtual ?? 0) + GMD_MEDIO * diasFuturos, pesoAlvo * 1.1), 0);
+    const arrobas     = (totalPeso * RENDIMENTO) / ARROBA_KG;
+    const receita     = precoArroba > 0 ? arrobas * precoArroba : 0;
+
+    return { mes: label, receita, qtd: totalQtd };
+  });
+
+  const fmtR = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  return (
+    <div className="space-y-4">
+      {/* Config metas */}
+      {(!precoArroba || !meta.pesoAlvoVenda) && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <p className="font-bold">Configure as metas</p>
+          <p className="text-xs mt-1">Vá em Gestão → Metas para definir o peso alvo e preço da arroba.</p>
+        </div>
+      )}
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 gap-3">
+        <MiniKpi label="Novilhos p/ venda" value={String(prontos.length)} cor="text-green-700" />
+        <MiniKpi label="Receita estimada (agora)"
+          value={precoArroba > 0
+            ? fmtR(prontos.reduce((s, a) => s + ((a.pesoAtual! * RENDIMENTO) / ARROBA_KG) * precoArroba, 0))
+            : '—'}
+          cor="text-green-700"
+        />
+        <MiniKpi label="Peso alvo" value={pesoAlvo > 0 ? `${pesoAlvo}kg` : '—'} cor="text-foreground" />
+        <MiniKpi label="Preço arroba" value={precoArroba > 0 ? fmtR(precoArroba) : '—'} cor="text-foreground" />
+      </div>
+
+      {/* Projeção 6 meses */}
+      {precoArroba > 0 && novilhos.length > 0 && (
+        <Section title="Projeção de Receita — Próximos 6 Meses">
+          <div className="divide-y">
+            {projMeses.map((m, i) => (
+              <div key={m.mes} className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <p className="text-sm font-bold">{m.mes}</p>
+                  <p className="text-xs text-muted-foreground">{m.qtd} animais</p>
+                </div>
+                <div className="text-right">
+                  <p className={`text-sm font-black ${m.receita > 0 ? 'text-green-700' : 'text-muted-foreground'}`}>
+                    {m.receita > 0 ? fmtR(m.receita) : '—'}
+                  </p>
+                  {i === 0 && m.qtd > 0 && (
+                    <p className="text-[10px] text-green-600 font-bold">Prontos agora</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-muted-foreground px-4 pb-3">
+            * Estimativa com GMD médio de {GMD_MEDIO} kg/dia e rendimento de carcaça de {RENDIMENTO * 100}%.
+          </p>
+        </Section>
+      )}
+
+      {/* Reprodução */}
+      {matrizes.length > 0 && (
+        <Section title="Projeção de Nascimentos">
+          <div className="divide-y">
+            {(() => {
+              const prenhas = matrizes.filter(a => a.dataPrevistoParto);
+              const mes3    = prenhas.filter(a => {
+                const d = a.dataPrevistoParto!;
+                const hoje_ = new Date();
+                const tres  = new Date(hoje_.getFullYear(), hoje_.getMonth() + 3, hoje_.getDate()).toISOString().slice(0, 10);
+                return d <= tres;
+              });
+              return [
+                { label: 'Prenhas c/ parto previsto', value: prenhas.length, cor: 'text-green-700' },
+                { label: 'Partos nos próximos 3 meses', value: mes3.length, cor: 'text-blue-600' },
+                { label: 'Sem diagnóstico', value: matrizes.filter(a => !a.statusReprodutivo).length, cor: 'text-muted-foreground' },
+              ].map(r => (
+                <div key={r.label} className="flex justify-between px-4 py-2.5 text-sm">
+                  <span className="text-muted-foreground">{r.label}</span>
+                  <span className={`font-black ${r.cor}`}>{r.value}</span>
+                </div>
+              ));
+            })()}
+          </div>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+// ─── Aba Comparação de Lotes ─────────────────────────────────────────────────
+
+function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
+  const lotes     = db.lotes ?? [];
+  const animais   = db.animais ?? [];
+  const eventos   = db.eventos ?? [];
+
+  const TIPOS_SAUDE: string[] = [
+    'Vacina Clostridioses','Vacina Febre Aftosa','Vacina Brucelose',
+    'Vacina Raiva','Vacina – Outro','Vermífugo','Banho Carrapaticida','Tratamento',
+  ];
+
+  interface LoteStats {
+    id: string;
+    nome: string;
+    cabecas: number;
+    pesoMedioKg: number | null;
+    gmdMedio: number | null;
+    eventosSaude: number;
+    matrizes: number;
+    prenhas: number;
+  }
+
+  const stats = useMemo((): LoteStats[] => {
+    return lotes.map(lote => {
+      const anis = animais.filter(a => a.loteId === lote.id && a.status === 'Vivo');
+      const cabecas = anis.reduce((s, a) => s + (a.qtdCabecas ?? a.cabecas ?? 1), 0);
+
+      // Peso médio
+      const comPeso = anis.filter(a => a.pesoAtual && a.pesoAtual > 0);
+      const pesoMedioKg = comPeso.length > 0
+        ? comPeso.reduce((s, a) => s + a.pesoAtual!, 0) / comPeso.length
+        : null;
+
+      // GMD médio dos individuais com >= 2 pesagens
+      const gmdList: number[] = [];
+      anis.filter(a => a.tipo === 'individual').forEach(a => {
+        const pesagens = eventos
+          .filter(e => e.brincoAnimal === a.brinco && e.peso && e.peso > 0)
+          .sort((x, y) => x.data.localeCompare(y.data));
+        if (pesagens.length < 2) return;
+        const dias = diffDays(pesagens[0].data, pesagens[pesagens.length - 1].data);
+        if (dias <= 0) return;
+        gmdList.push((pesagens[pesagens.length - 1].peso! - pesagens[0].peso!) / dias);
+      });
+      const gmdMedio = gmdList.length > 0
+        ? gmdList.reduce((s, g) => s + g, 0) / gmdList.length
+        : null;
+
+      // Eventos de saúde nos últimos 90 dias
+      const limite90 = new Date();
+      limite90.setDate(limite90.getDate() - 90);
+      const lim = limite90.toISOString().slice(0, 10);
+      const brincos = new Set(anis.map(a => a.brinco || a.nomeGrupo || ''));
+      const eventosSaude = eventos.filter(
+        e => brincos.has(e.brincoAnimal) && TIPOS_SAUDE.includes(e.tipo) && e.data >= lim
+      ).length;
+
+      // Matrizes e prenhas
+      const matrizes = anis.filter(a => a.categoria === 'Matriz').length;
+      const prenhas  = anis.filter(a => a.statusReprodutivo === 'Prenhe').length;
+
+      return { id: lote.id, nome: lote.nome, cabecas, pesoMedioKg, gmdMedio, eventosSaude, matrizes, prenhas };
+    }).filter(s => s.cabecas > 0);
+  }, [db, lotes, animais, eventos]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const semLote = animais.filter(a => a.status === 'Vivo' && !a.loteId);
+  const cabSemLote = semLote.reduce((s, a) => s + (a.qtdCabecas ?? a.cabecas ?? 1), 0);
+
+  const maxCab = Math.max(1, ...stats.map(s => s.cabecas));
+  const maxPeso = Math.max(1, ...stats.map(s => s.pesoMedioKg ?? 0));
+  const maxGmd  = Math.max(0.01, ...stats.map(s => s.gmdMedio ?? 0));
+
+  if (lotes.length === 0) {
+    return (
+      <div className="rounded-xl border bg-card p-8 text-center space-y-2">
+        <p className="text-3xl">🗂</p>
+        <p className="text-sm font-bold">Nenhum lote cadastrado</p>
+        <p className="text-xs text-muted-foreground">
+          Crie lotes em Gestão → Lotes e associe animais para ver a comparação aqui.
+        </p>
+      </div>
+    );
+  }
+
+  function ProgressBar({ pct, color }: { pct: number; color: string }) {
+    return (
+      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+        <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(pct * 100, 100)}%`, background: color }} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Resumo geral */}
+      <div className="grid grid-cols-3 gap-2">
+        <MiniKpi label="Lotes ativos" value={String(stats.length)} cor="text-foreground" />
+        <MiniKpi label="Total animais" value={String(stats.reduce((s, l) => s + l.cabecas, 0))} cor="text-green-700" />
+        <MiniKpi label="Sem lote" value={String(cabSemLote)} cor={cabSemLote > 0 ? 'text-amber-600' : 'text-muted-foreground'} />
+      </div>
+
+      {/* Cards de lote */}
+      {stats.map(s => (
+        <div key={s.id} className="rounded-xl border bg-card overflow-hidden">
+          <div className="px-4 py-3 border-b flex items-center justify-between">
+            <p className="text-sm font-black">{s.nome}</p>
+            <span className="text-xs font-bold px-2 py-0.5 rounded-full text-white" style={{ background: '#2D6A2F' }}>
+              {s.cabecas} cab.
+            </span>
+          </div>
+          <div className="p-4 space-y-3">
+            {/* Cabeças */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Cabeças</span>
+                <span className="font-bold">{s.cabecas}</span>
+              </div>
+              <ProgressBar pct={s.cabecas / maxCab} color="#2D6A2F" />
+            </div>
+
+            {/* Peso médio */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Peso médio</span>
+                <span className="font-bold">{s.pesoMedioKg != null ? `${s.pesoMedioKg.toFixed(0)} kg` : '—'}</span>
+              </div>
+              {s.pesoMedioKg != null && <ProgressBar pct={s.pesoMedioKg / maxPeso} color="#f59e0b" />}
+            </div>
+
+            {/* GMD médio */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">GMD médio</span>
+                <span className={`font-bold ${s.gmdMedio != null && s.gmdMedio >= 0.8 ? 'text-green-700' : 'text-orange-500'}`}>
+                  {s.gmdMedio != null ? `${s.gmdMedio.toFixed(2)} kg/d` : '—'}
+                </span>
+              </div>
+              {s.gmdMedio != null && <ProgressBar pct={s.gmdMedio / maxGmd} color={s.gmdMedio >= 0.8 ? '#22c55e' : '#f97316'} />}
+            </div>
+
+            {/* Saúde e reprodução */}
+            <div className="grid grid-cols-3 gap-2 pt-1">
+              <div className="rounded-lg bg-muted p-2 text-center">
+                <p className="text-[11px] font-black">{s.eventosSaude}</p>
+                <p className="text-[10px] text-muted-foreground">Saúde 90d</p>
+              </div>
+              <div className="rounded-lg bg-muted p-2 text-center">
+                <p className="text-[11px] font-black">{s.matrizes}</p>
+                <p className="text-[10px] text-muted-foreground">Matrizes</p>
+              </div>
+              <div className="rounded-lg bg-muted p-2 text-center">
+                <p className={`text-[11px] font-black ${s.prenhas > 0 ? 'text-blue-600' : ''}`}>{s.prenhas}</p>
+                <p className="text-[10px] text-muted-foreground">Prenhas</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {/* Gráfico comparativo — cabeças e peso médio */}
+      {stats.length >= 2 && (
+        <Section title="Comparativo — Peso Médio por Lote">
+          <div className="px-2 pb-2">
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={stats.filter(s => s.pesoMedioKg != null).map(s => ({
+                name: s.nome.length > 10 ? s.nome.slice(0, 10) + '…' : s.nome,
+                peso: parseFloat((s.pesoMedioKg ?? 0).toFixed(1)),
+              }))} barSize={22}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={40} tickFormatter={v => `${v}kg`} />
+                <Tooltip
+                  formatter={(v) => typeof v === 'number' ? [`${v} kg`, 'Peso médio'] : [String(v), 'Peso médio']}
+                  contentStyle={{ borderRadius: 8, fontSize: 12 }}
+                />
+                <Bar dataKey="peso" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Section>
       )}
     </div>
   );

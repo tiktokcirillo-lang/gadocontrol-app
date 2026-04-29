@@ -36,6 +36,11 @@ export interface Animal {
   numeroParto?: number;
   dataVenda?: string;
   precoVenda?: number;
+  // Compra
+  comprado?: boolean;
+  precoCompra?: number;
+  dataCompra?: string;
+  origemCompra?: string;
   dataDesmame?: string;
   mae?: string;
   pai?: string;

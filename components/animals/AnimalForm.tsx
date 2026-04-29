@@ -18,7 +18,7 @@ import { useDB } from '@/hooks/useDB';
 import { useAuth } from '@/contexts/AuthContext';
 import { uid, today, sumCabecas } from '@/lib/db';
 import { PLAN_LIMIT_FREE } from '@/lib/types';
-import type { Animal, AnimalCategoria, AnimalSexo, AnimalTipo } from '@/lib/types';
+import type { Animal, AnimalCategoria, AnimalSexo, AnimalTipo, Lancamento } from '@/lib/types';
 import {
   vNorm, extrairBrinco, detectarCategoria, detectarRaca, parseWeightFromSpeech, parseSpeechDate,
 } from '@/lib/vozHelpers';
@@ -46,6 +46,8 @@ function emptyForm() {
     sexo: '' as AnimalSexo | '', raca: '', dataNascimento: '', pesoAtual: '',
     pesoMedio: '', mae: '', pai: '', observacao: '', status: 'Vivo' as Animal['status'],
     sisbov: '', gta: '', marcaFogo: '', corteOrelha: '', foto: '',
+    // Compra
+    comprado: false, precoCompra: '', dataCompra: '', origemCompra: '',
   };
 }
 
@@ -167,6 +169,10 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
           marcaFogo:     a.marcaFogo    ?? '',
           corteOrelha:   a.corteOrelha  ?? '',
           foto:          a.foto         ?? '',
+          comprado:      a.comprado     ?? false,
+          precoCompra:   String(a.precoCompra ?? ''),
+          dataCompra:    a.dataCompra   ?? '',
+          origemCompra:  a.origemCompra ?? '',
         });
       }
     } else {
@@ -175,7 +181,9 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
     }
   }, [open, animalId]);
 
-  const set = (k: keyof ReturnType<typeof emptyForm>, v: string) =>
+  const set  = (k: keyof ReturnType<typeof emptyForm>, v: string) =>
+    setForm(f => ({ ...f, [k]: v }));
+  const setB = (k: keyof ReturnType<typeof emptyForm>, v: boolean) =>
     setForm(f => ({ ...f, [k]: v }));
 
   function validate(): string | null {
@@ -204,11 +212,23 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
     }
 
     setSaving(true);
-    const now = new Date().toISOString();
+    const now         = new Date().toISOString();
+    const precoCompra = form.comprado && form.precoCompra ? Number(form.precoCompra) : 0;
+    const qtdCab      = mode === 'grupo' ? (Number(form.qtdCabecas) || 1) : 1;
+    // Para grupo: valor total = preço × cabeças (se por cabeça) — usamos valor como informado
+    const valorCompra = precoCompra > 0 ? precoCompra : 0;
 
     update(d => {
       if (!d.animais) d.animais = [];
       const tipo: AnimalTipo = mode;
+
+      // ── Campos comuns ──
+      const compraFields = {
+        comprado:     form.comprado || undefined,
+        precoCompra:  precoCompra || undefined,
+        dataCompra:   form.dataCompra || undefined,
+        origemCompra: form.origemCompra.trim() || undefined,
+      };
 
       if (animalId) {
         const idx = d.animais.findIndex(a => a.id === animalId);
@@ -216,55 +236,75 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
           d.animais[idx] = {
             ...d.animais[idx],
             tipo,
-            brinco:        form.brinco.trim(),
-            nomeGrupo:     form.nomeGrupo.trim() || undefined,
-            qtdCabecas:    mode === 'grupo' ? Number(form.qtdCabecas) : undefined,
-            categoria:     form.categoria as AnimalCategoria,
-            sexo:          form.sexo as AnimalSexo || undefined,
-            raca:          form.raca || undefined,
+            brinco:         form.brinco.trim(),
+            nomeGrupo:      form.nomeGrupo.trim() || undefined,
+            qtdCabecas:     mode === 'grupo' ? Number(form.qtdCabecas) : undefined,
+            categoria:      form.categoria as AnimalCategoria,
+            sexo:           form.sexo as AnimalSexo || undefined,
+            raca:           form.raca || undefined,
             dataNascimento: form.dataNascimento || undefined,
-            pesoAtual:     form.pesoAtual  ? Number(form.pesoAtual)  : undefined,
-            pesoMedio:     form.pesoMedio  ? Number(form.pesoMedio)  : undefined,
-            mae:           form.mae.trim()        || undefined,
-            pai:           form.pai.trim()        || undefined,
-            observacao:    form.observacao.trim() || undefined,
-            status:        form.status,
-            sisbov:        form.sisbov.trim()     || undefined,
-            gta:           form.gta.trim()        || undefined,
-            marcaFogo:     form.marcaFogo.trim()  || undefined,
-            corteOrelha:   form.corteOrelha.trim()|| undefined,
-            foto:          form.foto || undefined,
-            updatedAt:     now,
+            pesoAtual:      form.pesoAtual  ? Number(form.pesoAtual)  : undefined,
+            pesoMedio:      form.pesoMedio  ? Number(form.pesoMedio)  : undefined,
+            mae:            form.mae.trim()         || undefined,
+            pai:            form.pai.trim()         || undefined,
+            observacao:     form.observacao.trim()  || undefined,
+            status:         form.status,
+            sisbov:         form.sisbov.trim()      || undefined,
+            gta:            form.gta.trim()         || undefined,
+            marcaFogo:      form.marcaFogo.trim()   || undefined,
+            corteOrelha:    form.corteOrelha.trim() || undefined,
+            foto:           form.foto || undefined,
+            ...compraFields,
+            updatedAt:      now,
           };
         }
         toast.success('Animal atualizado!');
       } else {
+        const ident  = (mode === 'grupo' ? form.nomeGrupo : form.brinco).trim();
         const novo: Animal = {
-          id:            uid(),
+          id:             uid(),
           tipo,
-          brinco:        form.brinco.trim(),
-          nomeGrupo:     form.nomeGrupo.trim() || undefined,
-          qtdCabecas:    mode === 'grupo' ? Number(form.qtdCabecas) : undefined,
-          categoria:     form.categoria as AnimalCategoria,
-          sexo:          form.sexo as AnimalSexo || undefined,
-          raca:          form.raca || undefined,
+          brinco:         form.brinco.trim(),
+          nomeGrupo:      form.nomeGrupo.trim() || undefined,
+          qtdCabecas:     mode === 'grupo' ? Number(form.qtdCabecas) : undefined,
+          categoria:      form.categoria as AnimalCategoria,
+          sexo:           form.sexo as AnimalSexo || undefined,
+          raca:           form.raca || undefined,
           dataNascimento: form.dataNascimento || undefined,
-          pesoAtual:     form.pesoAtual  ? Number(form.pesoAtual)  : undefined,
-          pesoMedio:     form.pesoMedio  ? Number(form.pesoMedio)  : undefined,
-          mae:           form.mae.trim()        || undefined,
-          pai:           form.pai.trim()        || undefined,
-          observacao:    form.observacao.trim() || undefined,
-          sisbov:        form.sisbov.trim()     || undefined,
-          gta:           form.gta.trim()        || undefined,
-          marcaFogo:     form.marcaFogo.trim()  || undefined,
-          corteOrelha:   form.corteOrelha.trim()|| undefined,
-          foto:          form.foto || undefined,
-          status:        'Vivo',
-          createdAt:     now,
-          updatedAt:     now,
+          pesoAtual:      form.pesoAtual  ? Number(form.pesoAtual)  : undefined,
+          pesoMedio:      form.pesoMedio  ? Number(form.pesoMedio)  : undefined,
+          mae:            form.mae.trim()         || undefined,
+          pai:            form.pai.trim()         || undefined,
+          observacao:     form.observacao.trim()  || undefined,
+          sisbov:         form.sisbov.trim()      || undefined,
+          gta:            form.gta.trim()         || undefined,
+          marcaFogo:      form.marcaFogo.trim()   || undefined,
+          corteOrelha:    form.corteOrelha.trim() || undefined,
+          foto:           form.foto || undefined,
+          ...compraFields,
+          status:         'Vivo',
+          createdAt:      now,
+          updatedAt:      now,
         };
         d.animais.push(novo);
-        toast.success('Animal cadastrado!');
+
+        // ── Lançamento automático de compra ──────────────────────────────
+        if (valorCompra > 0) {
+          if (!d.lancamentos) d.lancamentos = [];
+          const descQtd = mode === 'grupo' ? ` (${qtdCab} cab.)` : '';
+          const lancamento: Lancamento = {
+            id:        uid(),
+            tipo:      'despesa',
+            cat:       'Compra de Animal',
+            descricao: `Compra: ${ident}${descQtd} — ${form.categoria}${form.origemCompra.trim() ? ' · ' + form.origemCompra.trim() : ''}`,
+            valor:     valorCompra,
+            data:      form.dataCompra || today(),
+            createdAt: now,
+          };
+          d.lancamentos.push(lancamento);
+        }
+
+        toast.success(valorCompra > 0 ? 'Animal cadastrado e despesa lançada!' : 'Animal cadastrado!');
       }
     });
 
@@ -486,6 +526,83 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
               </select>
             </Field>
           )}
+
+          {/* ── Compra ── */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between rounded-xl border px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold">Animal Comprado?</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Lança automaticamente no financeiro
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setB('comprado', !form.comprado)}
+                className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none ${
+                  form.comprado ? 'bg-green-600' : 'bg-muted'
+                }`}
+                role="switch"
+                aria-checked={form.comprado}
+              >
+                <span
+                  className={`pointer-events-none block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform ${
+                    form.comprado ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {form.comprado && (
+              <div className="rounded-xl border border-green-200 bg-green-50 dark:bg-green-950/30 dark:border-green-800 p-4 space-y-3">
+                <p className="text-[11px] font-black text-green-700 dark:text-green-300 uppercase tracking-widest">
+                  Dados da Compra
+                </p>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label={mode === 'grupo' ? 'Valor Total (R$)' : 'Valor da Compra (R$)'}>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="0,00"
+                      value={form.precoCompra}
+                      onChange={e => set('precoCompra', e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Data da Compra">
+                    <Input
+                      type="date"
+                      value={form.dataCompra}
+                      onChange={e => set('dataCompra', e.target.value)}
+                    />
+                  </Field>
+                </div>
+
+                <Field label="Origem / Vendedor (opcional)">
+                  <Input
+                    placeholder="Ex: Fazenda São João"
+                    value={form.origemCompra}
+                    onChange={e => set('origemCompra', e.target.value)}
+                  />
+                </Field>
+
+                {form.precoCompra && Number(form.precoCompra) > 0 && (
+                  <div className="flex items-center gap-2 rounded-lg bg-green-100 dark:bg-green-900/40 px-3 py-2 text-xs text-green-800 dark:text-green-200">
+                    <span>💰</span>
+                    <span>
+                      {Number(form.precoCompra).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      {mode === 'grupo' && form.qtdCabecas && Number(form.qtdCabecas) > 0
+                        ? ` total · ${(Number(form.precoCompra) / Number(form.qtdCabecas)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /cabeça`
+                        : ''
+                      }
+                      {' '}será lançado em <strong>Financeiro → Despesas</strong>
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           <Button
             className="w-full font-bold h-11"

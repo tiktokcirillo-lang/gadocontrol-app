@@ -11,7 +11,7 @@ import { gerarRelatorioMensal } from '@/lib/exportar';
 import { calcDespesas, periodDates } from '@/lib/eventos';
 import type { AnimalCategoria } from '@/lib/types';
 
-type Tab = 'rebanho' | 'desempenho' | 'curva' | 'vendas' | 'projecao' | 'lotes' | 'custos' | 'pdf';
+type Tab = 'rebanho' | 'desempenho' | 'curva' | 'vendas' | 'projecao' | 'lotes' | 'custos' | 'indices' | 'pdf';
 
 const CORES_CAT: Record<string, string> = {
   Bezerro:   '#f59e0b',
@@ -56,6 +56,7 @@ export default function RelatoriosPage() {
           { key: 'projecao',   label: '🔮 Projeção'   },
           { key: 'lotes',      label: '🗂 Lotes'      },
           { key: 'custos',     label: '💹 Custos'      },
+          { key: 'indices',    label: '📊 Índices'     },
           { key: 'pdf',        label: '📄 PDF Mensal'  },
         ] as { key: Tab; label: string }[]).map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
@@ -73,6 +74,7 @@ export default function RelatoriosPage() {
       {tab === 'projecao'   && <TabProjecao   db={db} />}
       {tab === 'lotes'      && <TabLotes      db={db} />}
       {tab === 'custos'     && <TabCustos     db={db} />}
+      {tab === 'indices'    && <TabIndices    db={db} />}
       {tab === 'pdf'        && <TabPDFMensal  />}
     </div>
   );
@@ -1361,6 +1363,247 @@ function TabPDFMensal() {
           📄 Gerar PDF — {MESES_PT_FULL[mes - 1]} {ano}
         </button>
       </div>
+    </div>
+  );
+}
+
+// ─── Aba Índices Zootécnicos ──────────────────────────────────────────────────
+
+const BENCH_INDICES = {
+  prenhez:     { ext: 60,  semi: 80,  int: 88,  unidade: '%',  label: 'Taxa de Prenhez',       dir: 'high' },
+  natalidade:  { ext: 58,  semi: 78,  int: 86,  unidade: '%',  label: 'Taxa de Natalidade',     dir: 'high' },
+  desmame:     { ext: 55,  semi: 72,  int: 84,  unidade: '%',  label: 'Taxa de Desmame',        dir: 'high' },
+  mortalidade: { ext: 2,   semi: 1.5, int: 1,   unidade: '%',  label: 'Taxa de Mortalidade',    dir: 'low'  },
+  iep:         { ext: 420, semi: 380, int: 365, unidade: 'dias', label: 'Intervalo entre Partos', dir: 'low' },
+};
+
+function IndiceGauge({ valor, bench, dir, unidade }: {
+  valor: number | null; bench: number; dir: 'high' | 'low'; unidade: string;
+}) {
+  if (valor === null) return <span className="text-sm text-muted-foreground">—</span>;
+
+  const ok = dir === 'high' ? valor >= bench * 0.9 : valor <= bench * 1.1;
+  const bom = dir === 'high' ? valor >= bench : valor <= bench;
+
+  const cor = bom ? 'text-green-700' : ok ? 'text-amber-600' : 'text-red-600';
+  const bg  = bom ? 'bg-green-50 border-green-200' : ok ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200';
+  const tag = bom ? 'Bom' : ok ? 'Regular' : 'Abaixo';
+
+  return (
+    <div className={`flex items-center gap-2 px-2 py-1 rounded-lg border text-xs ${bg}`}>
+      <span className={`font-black text-sm ${cor}`}>{valor.toFixed(dir === 'low' ? 0 : 1)}{unidade}</span>
+      <span className={`text-[10px] font-bold ${cor}`}>{tag}</span>
+    </div>
+  );
+}
+
+function TabIndices({ db }: { db: ReturnType<typeof useDB>['db'] }) {
+  const [periodo, setPeriodo] = useState<'ano' | 'total'>('ano');
+
+  const animais  = db.animais  ?? [];
+  const eventos  = db.eventos  ?? [];
+  const hoje     = new Date().getFullYear();
+  const deAno    = `${hoje}-01-01`;
+
+  const evsFiltrados = useMemo(() =>
+    periodo === 'ano'
+      ? eventos.filter(e => e.data >= deAno)
+      : eventos,
+    [eventos, periodo, deAno],
+  );
+
+  const animaisVivos   = animais.filter(a => a.status === 'Vivo');
+  const matrizes       = animaisVivos.filter(a => a.categoria === 'Matriz');
+  const totalRebanho   = sumCabecas(animaisVivos);
+
+  // ── Taxa de Prenhez ──────────────────────────────────────────────────────
+  // prenhas diagnosticadas / total inseminações/coberturas × 100
+  const nInseminacoes = evsFiltrados.filter(e =>
+    e.tipo === 'Inseminação Artificial' || e.tipo === 'Cobertura Natural' || e.tipo === 'IATF — Inseminação'
+  ).length;
+  const nPrenhesDiag = evsFiltrados.filter(e =>
+    e.tipo === 'Diagnóstico de Gestação' && e.diagResult === 'Positivo (Prenhe)'
+  ).length;
+  const taxaPrenhez = nInseminacoes > 0 ? (nPrenhesDiag / nInseminacoes) * 100 : null;
+
+  // ── Taxa de Natalidade ───────────────────────────────────────────────────
+  // nascimentos no período / matrizes × 100
+  const nNascimentos = evsFiltrados.filter(e => e.tipo === 'Nascimento').length;
+  const taxaNatalidade = matrizes.length > 0 ? (nNascimentos / matrizes.length) * 100 : null;
+
+  // ── Taxa de Desmame ──────────────────────────────────────────────────────
+  // desmamados / nascidos × 100
+  const nDesmames = evsFiltrados.filter(e => e.tipo === 'Desmame').length;
+  const taxaDesmame = nNascimentos > 0 ? (nDesmames / nNascimentos) * 100 : null;
+
+  // ── Taxa de Mortalidade ──────────────────────────────────────────────────
+  // mortos no período / total rebanho × 100
+  const nMortes = periodo === 'ano'
+    ? animais.filter(a => a.status === 'Morto' && (a.updatedAt ?? '').slice(0, 4) === String(hoje)).length
+    : animais.filter(a => a.status === 'Morto').length;
+  const baseRebanho = totalRebanho + nMortes;
+  const taxaMortalidade = baseRebanho > 0 ? (nMortes / baseRebanho) * 100 : null;
+
+  // ── Intervalo Médio entre Partos ─────────────────────────────────────────
+  // Para cada matriz com numeroParto > 1, calcula dias entre partos via eventos
+  const iepValues: number[] = [];
+  const partosMap: Record<string, string[]> = {};
+  eventos
+    .filter(e => e.tipo === 'Nascimento')
+    .forEach(e => {
+      if (!partosMap[e.brincoAnimal]) partosMap[e.brincoAnimal] = [];
+      partosMap[e.brincoAnimal].push(e.data);
+    });
+  Object.values(partosMap).forEach(datas => {
+    if (datas.length < 2) return;
+    const sorted = [...datas].sort();
+    for (let i = 1; i < sorted.length; i++) {
+      const dias = Math.round((new Date(sorted[i]).getTime() - new Date(sorted[i-1]).getTime()) / 86400000);
+      if (dias > 200 && dias < 800) iepValues.push(dias); // sanity check
+    }
+  });
+  const iepMedio = iepValues.length > 0
+    ? iepValues.reduce((s, v) => s + v, 0) / iepValues.length
+    : null;
+
+  // ── Peso médio ao desmame ────────────────────────────────────────────────
+  const desmameComPeso = evsFiltrados.filter(e => e.tipo === 'Desmame' && e.peso);
+  const pesoDesmame = desmameComPeso.length > 0
+    ? desmameComPeso.reduce((s, e) => s + (e.peso ?? 0), 0) / desmameComPeso.length
+    : null;
+
+  // ── Peso médio à venda ───────────────────────────────────────────────────
+  const vendaComPeso = evsFiltrados.filter(e => e.tipo === 'Venda' && e.peso);
+  const pesoVenda = vendaComPeso.length > 0
+    ? vendaComPeso.reduce((s, e) => s + (e.peso ?? 0), 0) / vendaComPeso.length
+    : null;
+
+  // ── Eficiência reprodutiva composta ─────────────────────────────────────
+  const eficiencia = taxaPrenhez !== null && taxaNatalidade !== null && taxaDesmame !== null
+    ? (taxaPrenhez / 100) * (taxaNatalidade / 100) * (taxaDesmame / 100) * 100
+    : null;
+
+  return (
+    <div className="space-y-4">
+      {/* Período */}
+      <div className="flex gap-2">
+        {([
+          { key: 'ano',   label: `${hoje}` },
+          { key: 'total', label: 'Todo período' },
+        ] as { key: 'ano' | 'total'; label: string }[]).map(p => (
+          <button key={p.key} onClick={() => setPeriodo(p.key)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
+              periodo === p.key ? 'text-white border-transparent' : 'text-muted-foreground'
+            }`}
+            style={periodo === p.key ? { background: '#2D6A2F' } : {}}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {/* KPIs rápidos */}
+      <div className="grid grid-cols-2 gap-2">
+        <MiniKpi label="Matrizes" value={String(matrizes.length)} cor="text-purple-700" />
+        <MiniKpi label="Nascimentos" value={String(nNascimentos)} cor="text-green-700" />
+        <MiniKpi label="Inseminações/Coberturas" value={String(nInseminacoes)} cor="text-blue-700" />
+        <MiniKpi label="Mortes no período" value={String(nMortes)} cor="text-red-600" />
+      </div>
+
+      {/* Índices vs EMBRAPA */}
+      <Section title="Índices Reprodutivos e Produtivos">
+        <div className="divide-y">
+          {([
+            { label: 'Taxa de Prenhez',    valor: taxaPrenhez,    bench: BENCH_INDICES.prenhez,     detalhe: `${nPrenhesDiag} prenhas / ${nInseminacoes} procedimentos` },
+            { label: 'Taxa de Natalidade', valor: taxaNatalidade, bench: BENCH_INDICES.natalidade,  detalhe: `${nNascimentos} nascimentos / ${matrizes.length} matrizes` },
+            { label: 'Taxa de Desmame',    valor: taxaDesmame,    bench: BENCH_INDICES.desmame,      detalhe: `${nDesmames} desmamados / ${nNascimentos} nascidos` },
+            { label: 'Taxa de Mortalidade', valor: taxaMortalidade, bench: BENCH_INDICES.mortalidade, detalhe: `${nMortes} mortes / ${baseRebanho} rebanho` },
+          ].map(row => (
+            <div key={row.label} className="px-4 py-3">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-sm font-semibold">{row.label}</p>
+                <IndiceGauge
+                  valor={row.valor}
+                  bench={row.bench.ext}
+                  dir={row.bench.dir as 'high' | 'low'}
+                  unidade={row.bench.unidade}
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground">{row.detalhe}</p>
+              <div className="flex gap-4 mt-1">
+                <span className="text-[10px] text-muted-foreground">EMBRAPA extensivo: {row.bench.ext}{row.bench.unidade}</span>
+                <span className="text-[10px] text-muted-foreground">semi-intensivo: {row.bench.semi}{row.bench.unidade}</span>
+              </div>
+            </div>
+          )))}
+        </div>
+      </Section>
+
+      {/* IEP */}
+      <Section title="Intervalo entre Partos">
+        <div className="px-4 py-3">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-sm font-semibold">IEP Médio</p>
+            <IndiceGauge valor={iepMedio} bench={BENCH_INDICES.iep.ext} dir="low" unidade=" dias" />
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Calculado em {iepValues.length} intervalo{iepValues.length !== 1 ? 's' : ''} registrados.
+            Meta ideal: ≤ 365 dias (1 parto/ano).
+          </p>
+          <div className="flex gap-4 mt-1">
+            <span className="text-[10px] text-muted-foreground">Extensivo ref.: {BENCH_INDICES.iep.ext} dias</span>
+            <span className="text-[10px] text-muted-foreground">Ideal: {BENCH_INDICES.iep.int} dias</span>
+          </div>
+        </div>
+      </Section>
+
+      {/* Pesos médios */}
+      {(pesoDesmame !== null || pesoVenda !== null) && (
+        <Section title="Peso Médio">
+          {pesoDesmame !== null && (
+            <div className="flex justify-between items-center px-4 py-3 text-sm">
+              <div>
+                <p className="font-semibold">Ao Desmame</p>
+                <p className="text-[10px] text-muted-foreground">Ref. EMBRAPA extensivo: 165 kg</p>
+              </div>
+              <span className={`font-black text-base ${pesoDesmame >= 165 ? 'text-green-700' : 'text-amber-600'}`}>
+                {pesoDesmame.toFixed(0)} kg
+              </span>
+            </div>
+          )}
+          {pesoVenda !== null && (
+            <div className="flex justify-between items-center px-4 py-3 text-sm border-t">
+              <div>
+                <p className="font-semibold">À Venda</p>
+                <p className="text-[10px] text-muted-foreground">Ref. EMBRAPA terminação: 480 kg</p>
+              </div>
+              <span className={`font-black text-base ${pesoVenda >= 480 ? 'text-green-700' : 'text-amber-600'}`}>
+                {pesoVenda.toFixed(0)} kg
+              </span>
+            </div>
+          )}
+        </Section>
+      )}
+
+      {/* Eficiência composta */}
+      {eficiencia !== null && (
+        <div className={`rounded-xl border p-4 ${eficiencia >= 40 ? 'border-green-200 bg-green-50' : eficiencia >= 25 ? 'border-amber-200 bg-amber-50' : 'border-red-200 bg-red-50'}`}>
+          <p className="text-[11px] font-black text-muted-foreground uppercase tracking-widest mb-1">
+            Eficiência Reprodutiva Composta
+          </p>
+          <p className={`text-2xl font-black ${eficiencia >= 40 ? 'text-green-700' : eficiencia >= 25 ? 'text-amber-700' : 'text-red-700'}`}>
+            {eficiencia.toFixed(1)}%
+          </p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            Prenhez × Natalidade × Desmame. Extensivo ref.: ~20% · Intensivo ref.: ~60%
+          </p>
+        </div>
+      )}
+
+      {(matrizes.length === 0 || nInseminacoes === 0) && (
+        <div className="rounded-xl border bg-muted/20 p-4 text-center text-sm text-muted-foreground">
+          Registre eventos de inseminação, diagnóstico de gestação e nascimento para calcular os índices.
+        </div>
+      )}
     </div>
   );
 }

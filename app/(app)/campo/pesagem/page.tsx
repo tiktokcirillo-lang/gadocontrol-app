@@ -1,7 +1,25 @@
 'use client';
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
-import { Mic, MicOff, CheckCircle2, Scale, SkipForward, List, TableProperties, Zap } from 'lucide-react';
+import { Mic, MicOff, CheckCircle2, Scale, SkipForward, List, TableProperties, Zap, Bluetooth, BluetoothConnected, BluetoothOff } from 'lucide-react';
+
+// ── Minimal Web Bluetooth type declarations ──────────────────────────────────
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type BTDevice = {
+  name?: string;
+  gatt?: { connect(): Promise<BTServer>; disconnect(): void; connected: boolean };
+  addEventListener(event: string, cb: () => void): void;
+};
+type BTServer  = { getPrimaryService(uuid: string): Promise<BTService> };
+type BTService = { getCharacteristic(uuid: string): Promise<BTChar> };
+type BTChar    = {
+  startNotifications(): Promise<void>;
+  addEventListener(e: string, cb: (ev: any) => void): void;
+};
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+const BT_WEIGHT_SERVICE = '0000181d-0000-1000-8000-00805f9b34fb';
+const BT_WEIGHT_CHAR    = '00002a9d-0000-1000-8000-00805f9b34fb';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useDB } from '@/hooks/useDB';
@@ -73,6 +91,64 @@ export default function PesagemEmMassaPage() {
   const [filaAnimais, setFilaAnimais] = useState<Animal[]>([]);
   const [filaIdx,    setFilaIdx]    = useState(0);
   const [loteEscolhido, setLoteEscolhido] = useState('');
+
+  // ── Bluetooth ─────────────────────────────────────────────────────────────────
+  const [btStatus,   setBtStatus]   = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
+  const [btName,     setBtName]     = useState('');
+  const btDeviceRef = useRef<BTDevice | null>(null);
+  const btSupported = typeof navigator !== 'undefined' && 'bluetooth' in navigator;
+
+  async function conectarBT() {
+    if (!btSupported) return;
+    setBtStatus('connecting');
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bt = (navigator as any).bluetooth;
+      const device: BTDevice = await bt.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: [BT_WEIGHT_SERVICE],
+      });
+      btDeviceRef.current = device;
+      setBtName(device.name ?? 'Balança BT');
+      device.addEventListener('gattserverdisconnected', () => {
+        setBtStatus('idle');
+        setBtName('');
+        btDeviceRef.current = null;
+        toast('Balança desconectada.');
+      });
+      const server  = await device.gatt!.connect();
+      const service = await server.getPrimaryService(BT_WEIGHT_SERVICE);
+      const char    = await service.getCharacteristic(BT_WEIGHT_CHAR);
+      await char.startNotifications();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      char.addEventListener('characteristicvaluechanged', (e: any) => {
+        const view: DataView = e.target.value;
+        const flags   = view.getUint8(0);
+        const isSI    = (flags & 0x01) === 0;
+        const raw     = view.getUint16(1, true);
+        const weightKg = isSI ? raw * 0.005 : raw * 0.01 * 0.453592;
+        if (weightKg > 0 && weightKg <= 2000) {
+          const rounded = Math.round(weightKg * 10) / 10;
+          setPeso(String(rounded));
+          speakPt(`${rounded} quilos`);
+        }
+      });
+      setBtStatus('connected');
+      toast.success(`Balança conectada: ${device.name ?? 'dispositivo BT'}`);
+    } catch (err: unknown) {
+      if ((err as { name?: string }).name !== 'NotFoundError') {
+        toast.error('Erro ao conectar balança. Verifique se ela suporta o perfil GATT Weight Scale.');
+      }
+      setBtStatus('idle');
+    }
+  }
+
+  function desconectarBT() {
+    btDeviceRef.current?.gatt?.disconnect();
+    btDeviceRef.current = null;
+    setBtStatus('idle');
+    setBtName('');
+  }
 
   // ── Modo Tabela ───────────────────────────────────────────────────────────────
   const [tabelaLote,  setTabelaLote]  = useState('');
@@ -258,7 +334,7 @@ export default function PesagemEmMassaPage() {
           <h1 className="text-xl font-black flex items-center gap-2">
             <Scale className="w-5 h-5" /> Pesagem em Massa
           </h1>
-          <p className="text-xs text-muted-foreground">Voz com TTS · Modo fila · Tabela completa</p>
+          <p className="text-xs text-muted-foreground">Voz com TTS · Modo fila · Tabela · Bluetooth</p>
         </div>
       </div>
 
@@ -468,6 +544,55 @@ export default function PesagemEmMassaPage() {
             >
               Confirmar
             </button>
+          )}
+        </div>
+      )}
+
+      {/* Balança Bluetooth */}
+      {btSupported && (
+        <div className={`rounded-xl border p-4 space-y-3 ${btStatus === 'connected' ? 'border-blue-300 bg-blue-50 dark:bg-blue-950/30' : 'bg-card'}`}>
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-black text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+              <Bluetooth className="w-3.5 h-3.5" /> Balança Bluetooth
+            </p>
+            {btStatus === 'connected' && (
+              <span className="text-[10px] font-bold bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <BluetoothConnected className="w-3 h-3" /> {btName}
+              </span>
+            )}
+          </div>
+
+          {btStatus === 'idle' && (
+            <>
+              <p className="text-xs text-muted-foreground">
+                Conecte uma balança BLE compatível com o perfil GATT Weight Scale. O peso será preenchido automaticamente.
+              </p>
+              <button
+                onClick={conectarBT}
+                className="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold text-white"
+                style={{ background: '#1a56db' }}
+              >
+                <Bluetooth className="w-4 h-4" /> Conectar Balança
+              </button>
+            </>
+          )}
+
+          {btStatus === 'connecting' && (
+            <p className="text-xs text-center text-blue-700 font-bold py-1 animate-pulse">Buscando dispositivos…</p>
+          )}
+
+          {btStatus === 'connected' && (
+            <div className="space-y-2">
+              <p className="text-xs text-blue-700">
+                Aguardando leitura — o peso será preenchido automaticamente ao pesar.
+              </p>
+              <button
+                onClick={desconectarBT}
+                className="flex items-center gap-1.5 text-xs font-bold text-red-600 hover:underline"
+              >
+                <BluetoothOff className="w-3.5 h-3.5" /> Desconectar
+              </button>
+            </div>
           )}
         </div>
       )}

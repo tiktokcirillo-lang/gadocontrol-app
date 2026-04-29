@@ -128,6 +128,17 @@ export interface Lote {
   id: string;
   nome: string;
   descricao?: string;
+  pastoId?: string;
+  createdAt: string;
+}
+
+export interface Pasto {
+  id: string;
+  nome: string;
+  areaHa: number;
+  forrageira?: string;   // Braquiária, Tifton 85, Mombaça, etc.
+  capacidadeUA?: number; // UA/ha máxima configurada pelo produtor
+  obs?: string;
   createdAt: string;
 }
 
@@ -191,6 +202,7 @@ export interface DB {
   eventos: Evento[];
   lancamentos: Lancamento[];
   lotes: Lote[];
+  pastos: Pasto[];
   estoque: EstoqueItem[];
   protocolos: ProtocoloSanitario[];
   estacoesMonta: EstacaoMonta[];

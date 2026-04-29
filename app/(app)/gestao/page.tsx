@@ -9,9 +9,9 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { CAT_ICON } from '@/lib/types';
-import type { AnimalCategoria, EstacaoMonta } from '@/lib/types';
+import type { AnimalCategoria, EstacaoMonta, Pasto } from '@/lib/types';
 
-type Tab = 'ciclos' | 'iatf' | 'em' | 'lotes' | 'metas';
+type Tab = 'ciclos' | 'iatf' | 'em' | 'lotes' | 'pastos' | 'metas';
 
 // Dias esperados de cada etapa a partir do D0
 const IATF_DIAS = { D8: 8, D17: 17, IA: 19 };
@@ -25,27 +25,29 @@ export default function GestaoPage() {
       <h1 className="text-xl font-black">Gestão</h1>
 
       {/* Tabs */}
-      <div className="grid grid-cols-5 rounded-lg border p-1 gap-1">
+      <div className="flex gap-1 overflow-x-auto rounded-lg border p-1 scrollbar-none">
         {([
-          { key: 'ciclos', label: '🔄 Ciclos' },
-          { key: 'iatf',   label: '🔬 IATF'   },
-          { key: 'em',     label: '❤️ EM'      },
-          { key: 'lotes',  label: '🌿 Lotes'  },
-          { key: 'metas',  label: '🎯 Metas'  },
+          { key: 'ciclos',  label: '🔄 Ciclos' },
+          { key: 'iatf',    label: '🔬 IATF'   },
+          { key: 'em',      label: '❤️ EM'      },
+          { key: 'lotes',   label: '🌿 Lotes'  },
+          { key: 'pastos',  label: '🌾 Pastos' },
+          { key: 'metas',   label: '🎯 Metas'  },
         ] as { key: Tab; label: string }[]).map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            className={`rounded-md py-2 text-[11px] font-bold transition-colors ${tab === t.key ? 'text-white' : 'text-muted-foreground'}`}
+            className={`shrink-0 rounded-md px-3 py-2 text-[11px] font-bold transition-colors ${tab === t.key ? 'text-white' : 'text-muted-foreground'}`}
             style={tab === t.key ? { background: '#2D6A2F' } : {}}>
             {t.label}
           </button>
         ))}
       </div>
 
-      {tab === 'ciclos' && <TabCiclos db={db} />}
-      {tab === 'iatf'   && <TabIATF   db={db} />}
-      {tab === 'em'     && <TabEstacaoMonta db={db} />}
-      {tab === 'lotes'  && <TabLotes  db={db} />}
-      {tab === 'metas'  && <TabMetas  db={db} />}
+      {tab === 'ciclos'  && <TabCiclos db={db} />}
+      {tab === 'iatf'    && <TabIATF   db={db} />}
+      {tab === 'em'      && <TabEstacaoMonta db={db} />}
+      {tab === 'lotes'   && <TabLotes  db={db} />}
+      {tab === 'pastos'  && <TabPastos db={db} />}
+      {tab === 'metas'   && <TabMetas  db={db} />}
     </div>
   );
 }
@@ -423,9 +425,10 @@ function TabIATF({ db }: { db: ReturnType<typeof useDB>['db'] }) {
 function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
   const { update } = useDB();
   const [sheetOpen,       setSheetOpen]       = useState(false);
-  const [editLote,        setEditLote]        = useState<{ id: string; nome: string; descricao: string } | null>(null);
+  const [editLote,        setEditLote]        = useState<{ id: string; nome: string; descricao: string; pastoId?: string } | null>(null);
   const [nome,            setNome]            = useState('');
   const [descricao,       setDescricao]       = useState('');
+  const [lotePastoId,     setLotePastoId]     = useState('');
   const [expandId,        setExpandId]        = useState<string | null>(null);
   const [selAnimais,      setSelAnimais]      = useState<string[]>([]);
   const [buscaAnimal,     setBuscaAnimal]     = useState('');
@@ -466,14 +469,16 @@ function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
 
   function abrirForm(lote?: typeof db.lotes[0]) {
     if (lote) {
-      setEditLote({ id: lote.id, nome: lote.nome, descricao: lote.descricao ?? '' });
+      setEditLote({ id: lote.id, nome: lote.nome, descricao: lote.descricao ?? '', pastoId: lote.pastoId });
       setNome(lote.nome);
       setDescricao(lote.descricao ?? '');
+      setLotePastoId(lote.pastoId ?? '');
       setSelAnimais((db.animais ?? []).filter(a => a.loteId === lote.id).map(a => a.id));
     } else {
       setEditLote(null);
       setNome('');
       setDescricao('');
+      setLotePastoId('');
       setSelAnimais([]);
     }
     setBuscaAnimal('');
@@ -486,8 +491,9 @@ function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
     // Gera o ID e captura flags ANTES de entrar no update para evitar closures instáveis
     const isEdit  = !!editLote;
     const loteId  = editLote ? editLote.id : uid();
-    const nomeTrimmed = nome.trim();
-    const descTrimmed = descricao.trim() || undefined;
+    const nomeTrimmed  = nome.trim();
+    const descTrimmed  = descricao.trim() || undefined;
+    const pastoIdSave  = lotePastoId || undefined;
     const selSet  = new Set(selAnimais);
 
     update(d => {
@@ -498,9 +504,10 @@ function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
         if (idx !== -1) {
           d.lotes[idx].nome      = nomeTrimmed;
           d.lotes[idx].descricao = descTrimmed;
+          d.lotes[idx].pastoId   = pastoIdSave;
         }
       } else {
-        d.lotes.push({ id: loteId, nome: nomeTrimmed, descricao: descTrimmed, createdAt: new Date().toISOString() });
+        d.lotes.push({ id: loteId, nome: nomeTrimmed, descricao: descTrimmed, pastoId: pastoIdSave, createdAt: new Date().toISOString() });
       }
 
       // Atualiza loteId dos animais em massa
@@ -577,6 +584,9 @@ function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
               ? comPeso.reduce((s, a) => s + (a.pesoAtual ?? a.pesoMedio ?? 0), 0) / comPeso.length
               : null;
 
+            // Pasto vinculado
+            const pastoNome = lote.pastoId ? (db.pastos ?? []).find(p => p.id === lote.pastoId)?.nome : null;
+
             return (
               <div key={lote.id} className="rounded-xl border bg-card overflow-hidden">
                 {/* Header do card */}
@@ -588,6 +598,7 @@ function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold truncate">{lote.nome}</p>
                       <p className="text-[11px] text-muted-foreground truncate">
+                        {pastoNome && <span className="text-green-700 font-medium">🌾 {pastoNome} · </span>}
                         {animais.length > 0
                           ? (catSummary || `${animais.length} animais`) + (pesoMedio ? ` · ${Math.round(pesoMedio)}kg méd.` : '')
                           : 'Sem animais — clique em ✏️ para adicionar'}
@@ -665,7 +676,7 @@ function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
           </SheetHeader>
           <div className="space-y-4 pb-8">
 
-            {/* Nome + Descrição */}
+            {/* Nome + Descrição + Pasto */}
             <div className="space-y-3">
               <div className="space-y-1">
                 <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Nome do Lote *</Label>
@@ -675,6 +686,20 @@ function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
                 <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Descrição</Label>
                 <Input placeholder="Opcional" value={descricao} onChange={e => setDescricao(e.target.value)} />
               </div>
+              {(db.pastos ?? []).length > 0 && (
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pasto</Label>
+                  <select
+                    value={lotePastoId}
+                    onChange={e => setLotePastoId(e.target.value)}
+                    className="w-full border rounded-md px-3 py-2 text-sm bg-background">
+                    <option value="">Sem pasto vinculado</option>
+                    {(db.pastos ?? []).map(p => (
+                      <option key={p.id} value={p.id}>{p.nome} ({p.areaHa} ha)</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             {/* Seleção de animais em massa */}
@@ -760,6 +785,258 @@ function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
 
             <Button className="w-full font-bold h-11" style={{ background: '#2D6A2F' }} onClick={salvar}>
               {editLote ? 'Salvar Alterações' : 'Criar Lote'}
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
+
+// ─── Aba Pastos ──────────────────────────────────────────────────────────────
+
+// 1 UA = 450 kg PV (padrão EMBRAPA)
+const UA_POR_CAT: Record<string, number> = {
+  Bezerro: 0.25, Bezerra: 0.25, Desmamado: 0.5,
+  Novilho: 0.8,  Novilha: 0.7,  Matriz: 1.0,
+  Touro: 1.2,    Boi: 1.0,
+};
+
+function calcUA(animais: ReturnType<typeof useDB>['db']['animais']): number {
+  return animais.reduce((s, a) => {
+    const peso = a.pesoAtual ?? a.pesoMedio;
+    const ua = peso ? peso / 450 : (UA_POR_CAT[a.categoria] ?? 1.0);
+    return s + ua * (a.tipo === 'grupo' ? (a.qtdCabecas ?? 1) : 1);
+  }, 0);
+}
+
+function TabPastos({ db }: { db: ReturnType<typeof useDB>['db'] }) {
+  const { update } = useDB();
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [editId,    setEditId]    = useState<string | null>(null);
+  const [nome,      setNome]      = useState('');
+  const [areaHa,    setAreaHa]    = useState('');
+  const [forrageira, setForrageira] = useState('');
+  const [capUA,     setCapUA]     = useState('');
+  const [obs,       setObs]       = useState('');
+  const [expandId,  setExpandId]  = useState<string | null>(null);
+
+  const pastos = db.pastos ?? [];
+  const lotes  = db.lotes  ?? [];
+
+  // Animais em cada pasto (via lote → pastoId)
+  const animaisPorPasto = useMemo(() => {
+    const map: Record<string, typeof db.animais> = {};
+    pastos.forEach(p => { map[p.id] = []; });
+    lotes.forEach(l => {
+      if (!l.pastoId) return;
+      const anim = (db.animais ?? []).filter(a => a.loteId === l.id && a.status === 'Vivo');
+      if (!map[l.pastoId]) map[l.pastoId] = [];
+      map[l.pastoId].push(...anim);
+    });
+    return map;
+  }, [db, pastos, lotes]);
+
+  function abrirForm(p?: Pasto) {
+    if (p) {
+      setEditId(p.id); setNome(p.nome);
+      setAreaHa(String(p.areaHa)); setForrageira(p.forrageira ?? '');
+      setCapUA(p.capacidadeUA ? String(p.capacidadeUA) : '');
+      setObs(p.obs ?? '');
+    } else {
+      setEditId(null); setNome(''); setAreaHa('');
+      setForrageira(''); setCapUA(''); setObs('');
+    }
+    setSheetOpen(true);
+  }
+
+  function salvar() {
+    if (!nome.trim())      { toast.error('Informe o nome do pasto.'); return; }
+    if (!areaHa || Number(areaHa) <= 0) { toast.error('Informe a área em hectares.'); return; }
+    const isEdit = !!editId;
+    const id = editId ?? uid();
+    update(d => {
+      if (!d.pastos) d.pastos = [];
+      const item: Pasto = {
+        id, nome: nome.trim(), areaHa: Number(areaHa),
+        forrageira: forrageira.trim() || undefined,
+        capacidadeUA: capUA ? Number(capUA) : undefined,
+        obs: obs.trim() || undefined,
+        createdAt: isEdit ? (d.pastos.find(p => p.id === id)?.createdAt ?? new Date().toISOString()) : new Date().toISOString(),
+      };
+      if (isEdit) {
+        const idx = d.pastos.findIndex(p => p.id === id);
+        if (idx !== -1) d.pastos[idx] = item;
+      } else {
+        d.pastos.push(item);
+      }
+    });
+    toast.success(isEdit ? 'Pasto atualizado!' : 'Pasto criado!');
+    setSheetOpen(false);
+  }
+
+  function deletar(id: string, nomeP: string) {
+    if (!confirm(`Remover pasto "${nomeP}"? Os lotes não serão alterados.`)) return;
+    update(d => {
+      d.pastos = (d.pastos ?? []).filter(p => p.id !== id);
+      // Desvincula lotes
+      (d.lotes ?? []).forEach((l, i) => { if (l.pastoId === id) d.lotes[i] = { ...l, pastoId: undefined }; });
+    });
+    toast.success('Pasto removido.');
+  }
+
+  const FORRAGEIRAS = ['Braquiária', 'Tifton 85', 'Mombaça', 'Tanzânia', 'Capim-elefante', 'Brachiaria brizantha', 'Outro'];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-between items-center">
+        <p className="text-xs text-muted-foreground">
+          {pastos.length} pasto{pastos.length !== 1 ? 's' : ''} · {(pastos.reduce((s, p) => s + p.areaHa, 0)).toFixed(0)} ha total
+        </p>
+        <button onClick={() => abrirForm()}
+          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold text-white"
+          style={{ background: '#2D6A2F' }}>
+          <Plus className="h-3.5 w-3.5" /> Novo Pasto
+        </button>
+      </div>
+
+      {pastos.length === 0 ? (
+        <div className="rounded-xl border bg-card p-6 text-center space-y-1">
+          <p className="text-sm font-bold">Nenhum pasto cadastrado</p>
+          <p className="text-xs text-muted-foreground">
+            Cadastre seus pastos para monitorar a lotação (UA/ha) e evitar superpastejo.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {pastos.map(p => {
+            const anim     = animaisPorPasto[p.id] ?? [];
+            const uaAtual  = calcUA(anim);
+            const uaHaAtual = p.areaHa > 0 ? uaAtual / p.areaHa : 0;
+            const capHa    = p.capacidadeUA ?? 1.0;
+            const pct      = Math.min(100, (uaHaAtual / capHa) * 100);
+            const alerta   = uaHaAtual > capHa * 1.1;
+            const aviso    = uaHaAtual > capHa * 0.9 && !alerta;
+            const expanded = expandId === p.id;
+
+            return (
+              <div key={p.id} className="rounded-xl border bg-card overflow-hidden">
+                <div className="flex items-center gap-2 px-4 py-3">
+                  <button onClick={() => setExpandId(expanded ? null : p.id)}
+                    className="flex-1 flex items-center gap-3 text-left min-w-0">
+                    <span className="text-lg shrink-0">🌾</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold truncate">{p.nome}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {p.areaHa} ha{p.forrageira ? ` · ${p.forrageira}` : ''}
+                        {anim.length > 0 ? ` · ${anim.length} animais` : ''}
+                      </p>
+                    </div>
+                    <div className={`text-[10px] font-black px-2 py-1 rounded-full shrink-0 ${
+                      alerta ? 'bg-red-100 text-red-700' : aviso ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
+                    }`}>
+                      {uaHaAtual.toFixed(1)} UA/ha
+                    </div>
+                    {expanded
+                      ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                  </button>
+                  <button onClick={() => abrirForm(p)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button onClick={() => deletar(p.id, p.nome)} className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 hover:bg-red-50">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                {expanded && (
+                  <div className="border-t bg-muted/10 px-4 py-3 space-y-3">
+                    {/* Barra de lotação */}
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-muted-foreground">Lotação atual</span>
+                        <span className={`font-bold ${alerta ? 'text-red-700' : aviso ? 'text-amber-700' : 'text-green-700'}`}>
+                          {uaAtual.toFixed(1)} UA / {(capHa * p.areaHa).toFixed(1)} UA máx
+                        </span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${alerta ? 'bg-red-500' : aviso ? 'bg-amber-400' : 'bg-green-600'}`}
+                          style={{ width: `${pct}%` }} />
+                      </div>
+                      {alerta && (
+                        <p className="text-[10px] text-red-600 mt-1">⚠ Superpastejo! Lotação acima da capacidade.</p>
+                      )}
+                    </div>
+
+                    {/* Lotes neste pasto */}
+                    <div>
+                      <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide mb-1">Lotes neste pasto</p>
+                      {lotes.filter(l => l.pastoId === p.id).length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic">Nenhum lote associado. Edite um lote e selecione este pasto.</p>
+                      ) : (
+                        <div className="space-y-1">
+                          {lotes.filter(l => l.pastoId === p.id).map(l => (
+                            <div key={l.id} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-muted/40">
+                              <span className="font-medium">🌿 {l.nome}</span>
+                              <span className="text-muted-foreground">
+                                {(db.animais ?? []).filter(a => a.loteId === l.id && a.status === 'Vivo').length} animais
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {p.obs && <p className="text-xs text-muted-foreground">{p.obs}</p>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Sheet criar/editar pasto */}
+      <Sheet open={sheetOpen} onOpenChange={v => !v && setSheetOpen(false)}>
+        <SheetContent side="bottom" className="max-h-[92vh] overflow-y-auto rounded-t-2xl">
+          <SheetHeader className="pb-3">
+            <SheetTitle>{editId ? 'Editar Pasto' : 'Novo Pasto'}</SheetTitle>
+          </SheetHeader>
+          <div className="space-y-3 pb-8">
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Nome do Pasto *</Label>
+              <Input placeholder="Ex: Pasto Norte, Retiro A..." value={nome} onChange={e => setNome(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Área (ha) *</Label>
+                <Input type="number" min="0.1" step="0.1" placeholder="Ex: 50" value={areaHa} onChange={e => setAreaHa(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Capacidade (UA/ha)</Label>
+                <Input type="number" min="0.1" step="0.1" placeholder="Ex: 1.0" value={capUA} onChange={e => setCapUA(e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Forrageira</Label>
+              <select value={forrageira} onChange={e => setForrageira(e.target.value)}
+                className="w-full border rounded-md px-3 py-2 text-sm bg-background">
+                <option value="">Selecione...</option>
+                {FORRAGEIRAS.map(f => <option key={f}>{f}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Observações</Label>
+              <textarea rows={2} placeholder="Notas sobre o pasto..."
+                value={obs} onChange={e => setObs(e.target.value)}
+                className="w-full border rounded-md px-3 py-2 text-sm bg-background resize-none" />
+            </div>
+            <div className="rounded-xl bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-800">
+              <strong>Referência EMBRAPA:</strong> extensivo ≤ 1 UA/ha · semi-intensivo 1–3 UA/ha · confinamento &gt; 3 UA/ha.
+              1 UA = 450 kg PV.
+            </div>
+            <Button className="w-full font-bold h-11" style={{ background: '#2D6A2F' }} onClick={salvar}>
+              {editId ? 'Salvar Alterações' : 'Criar Pasto'}
             </Button>
           </div>
         </SheetContent>

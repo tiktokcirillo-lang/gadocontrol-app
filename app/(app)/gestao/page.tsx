@@ -1,6 +1,6 @@
 'use client';
 import { useState, useMemo } from 'react';
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Save, Heart } from 'lucide-react';
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Save, Heart, X, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDB } from '@/hooks/useDB';
 import { addDias, diffDays, fmtDate, today, uid } from '@/lib/db';
@@ -422,11 +422,18 @@ function TabIATF({ db }: { db: ReturnType<typeof useDB>['db'] }) {
 
 function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
   const { update } = useDB();
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [editLote,  setEditLote]  = useState<{ id: string; nome: string; descricao: string } | null>(null);
-  const [nome,      setNome]      = useState('');
-  const [descricao, setDescricao] = useState('');
-  const [expandId,  setExpandId]  = useState<string | null>(null);
+  const [sheetOpen,       setSheetOpen]       = useState(false);
+  const [editLote,        setEditLote]        = useState<{ id: string; nome: string; descricao: string } | null>(null);
+  const [nome,            setNome]            = useState('');
+  const [descricao,       setDescricao]       = useState('');
+  const [expandId,        setExpandId]        = useState<string | null>(null);
+  const [selAnimais,      setSelAnimais]      = useState<string[]>([]);
+  const [buscaAnimal,     setBuscaAnimal]     = useState('');
+  const [filtroCategoria, setFiltroCategoria] = useState('');
+
+  const lotes           = db.lotes ?? [];
+  const todosVivos      = useMemo(() => (db.animais ?? []).filter(a => a.status === 'Vivo'), [db]);
+  const totalAlocados   = useMemo(() => (db.animais ?? []).filter(a => a.loteId).length, [db]);
 
   // Animais por lote
   const animaisPorLote = useMemo(() => {
@@ -438,16 +445,39 @@ function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
     return map;
   }, [db]);
 
+  // Categorias únicas para filtro
+  const categorias = useMemo(() =>
+    Array.from(new Set(todosVivos.map(a => a.categoria))).sort()
+  , [todosVivos]);
+
+  // Animais filtrados para o seletor no sheet
+  const animaisFiltrados = useMemo(() => {
+    let list = todosVivos;
+    if (filtroCategoria) list = list.filter(a => a.categoria === filtroCategoria);
+    if (buscaAnimal.trim()) {
+      const q = buscaAnimal.toLowerCase();
+      list = list.filter(a =>
+        (a.brinco ?? '').toLowerCase().includes(q) ||
+        (a.nomeGrupo ?? '').toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [todosVivos, buscaAnimal, filtroCategoria]);
+
   function abrirForm(lote?: typeof db.lotes[0]) {
     if (lote) {
       setEditLote({ id: lote.id, nome: lote.nome, descricao: lote.descricao ?? '' });
       setNome(lote.nome);
       setDescricao(lote.descricao ?? '');
+      setSelAnimais((db.animais ?? []).filter(a => a.loteId === lote.id).map(a => a.id));
     } else {
       setEditLote(null);
       setNome('');
       setDescricao('');
+      setSelAnimais([]);
     }
+    setBuscaAnimal('');
+    setFiltroCategoria('');
     setSheetOpen(true);
   }
 
@@ -455,36 +485,61 @@ function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
     if (!nome.trim()) { toast.error('Informe o nome do lote.'); return; }
     update(d => {
       if (!d.lotes) d.lotes = [];
+      const loteId = editLote ? editLote.id : uid();
+
       if (editLote) {
         const idx = d.lotes.findIndex(l => l.id === editLote.id);
         if (idx !== -1) {
           d.lotes[idx].nome      = nome.trim();
           d.lotes[idx].descricao = descricao.trim() || undefined;
         }
-        toast.success('Lote atualizado!');
       } else {
-        d.lotes.push({ id: uid(), nome: nome.trim(), descricao: descricao.trim() || undefined, createdAt: new Date().toISOString() });
-        toast.success('Lote criado!');
+        d.lotes.push({ id: loteId, nome: nome.trim(), descricao: descricao.trim() || undefined, createdAt: new Date().toISOString() });
       }
+
+      // Atualiza loteId dos animais em massa
+      const selSet = new Set(selAnimais);
+      (d.animais ?? []).forEach((a, i) => {
+        if (selSet.has(a.id)) {
+          d.animais[i] = { ...a, loteId };
+        } else if (a.loteId === loteId) {
+          d.animais[i] = { ...a, loteId: undefined };
+        }
+      });
+
+      toast.success(editLote ? 'Lote atualizado!' : 'Lote criado!');
     });
     setSheetOpen(false);
   }
 
-  function deletar(id: string, nome: string) {
-    if (!confirm(`Remover lote "${nome}"? Os animais não serão excluídos.`)) return;
+  function deletar(id: string, lotNome: string) {
+    if (!confirm(`Remover lote "${lotNome}"? Os animais não serão excluídos.`)) return;
     update(d => {
       d.lotes = (d.lotes ?? []).filter(l => l.id !== id);
-      (d.animais ?? []).forEach(a => { if (a.loteId === id) delete a.loteId; });
+      (d.animais ?? []).forEach((a, i) => { if (a.loteId === id) d.animais[i] = { ...a, loteId: undefined }; });
     });
     toast.success('Lote removido.');
   }
 
-  const lotes = db.lotes ?? [];
+  function removerDoLote(animalId: string) {
+    update(d => {
+      const idx = (d.animais ?? []).findIndex(a => a.id === animalId);
+      if (idx !== -1) d.animais[idx] = { ...d.animais[idx], loteId: undefined };
+    });
+    toast.success('Animal removido do lote.');
+  }
+
+  // Verifica se algum animal filtrado está em outro lote
+  const temAnimalEmOutroLote = animaisFiltrados.some(
+    a => a.loteId && a.loteId !== editLote?.id && selAnimais.includes(a.id),
+  );
 
   return (
     <div className="space-y-3">
       <div className="flex justify-between items-center">
-        <p className="text-xs text-muted-foreground">{lotes.length} lote{lotes.length !== 1 ? 's' : ''} cadastrado{lotes.length !== 1 ? 's' : ''}</p>
+        <p className="text-xs text-muted-foreground">
+          {lotes.length} lote{lotes.length !== 1 ? 's' : ''} · {totalAlocados} animal(is) alocado{totalAlocados !== 1 ? 's' : ''}
+        </p>
         <button
           onClick={() => abrirForm()}
           className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold text-white"
@@ -497,29 +552,44 @@ function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
         <div className="rounded-xl border bg-card p-6 text-center space-y-1">
           <p className="text-sm font-bold">Nenhum lote cadastrado</p>
           <p className="text-xs text-muted-foreground">
-            Crie lotes para organizar seus animais por pasto, curral ou grupo.
+            Crie lotes para organizar seus animais por pasto, curral ou grupo de manejo.
           </p>
         </div>
       ) : (
-        <div className="rounded-xl border bg-card divide-y overflow-hidden">
+        <div className="space-y-2">
           {lotes.map(lote => {
             const animais  = animaisPorLote[lote.id] ?? [];
             const expanded = expandId === lote.id;
+
+            // Breakdown por categoria
+            const catMap: Record<string, number> = {};
+            animais.forEach(a => { catMap[a.categoria] = (catMap[a.categoria] ?? 0) + 1; });
+            const catSummary = Object.entries(catMap).map(([c, n]) => `${n} ${c}`).join(' · ');
+
+            // Peso médio
+            const comPeso   = animais.filter(a => (a.pesoAtual ?? a.pesoMedio));
+            const pesoMedio = comPeso.length > 0
+              ? comPeso.reduce((s, a) => s + (a.pesoAtual ?? a.pesoMedio ?? 0), 0) / comPeso.length
+              : null;
+
             return (
-              <div key={lote.id}>
-                <div className="flex items-center gap-3 px-4 py-3">
+              <div key={lote.id} className="rounded-xl border bg-card overflow-hidden">
+                {/* Header do card */}
+                <div className="flex items-center gap-2 px-4 py-3">
                   <button
                     onClick={() => setExpandId(expanded ? null : lote.id)}
                     className="flex-1 flex items-center gap-3 text-left min-w-0">
                     <span className="text-lg shrink-0">🌿</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold truncate">{lote.nome}</p>
-                      {lote.descricao && (
-                        <p className="text-[11px] text-muted-foreground truncate">{lote.descricao}</p>
-                      )}
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        {animais.length > 0
+                          ? (catSummary || `${animais.length} animais`) + (pesoMedio ? ` · ${Math.round(pesoMedio)}kg méd.` : '')
+                          : 'Sem animais — clique em ✏️ para adicionar'}
+                      </p>
                     </div>
-                    <span className="text-xs font-bold text-muted-foreground shrink-0 mr-1">
-                      {animais.length} anim.
+                    <span className="text-xs font-black bg-muted text-muted-foreground px-2 py-0.5 rounded-full shrink-0">
+                      {animais.length}
                     </span>
                     {expanded
                       ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -535,19 +605,45 @@ function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
                   </button>
                 </div>
 
+                {/* Animais expandidos */}
                 {expanded && (
-                  <div className="border-t bg-muted/20 divide-y">
-                    {animais.length === 0 ? (
-                      <p className="text-xs text-muted-foreground px-4 py-3 italic">
-                        Nenhum animal neste lote. Edite um animal e atribua este lote.
+                  <div className="border-t bg-muted/20">
+                    <div className="flex items-center justify-between px-4 py-2 border-b">
+                      <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide">
+                        {animais.length} animal(is) no lote
                       </p>
-                    ) : animais.map(a => (
-                      <div key={a.id} className="flex items-center gap-2 px-4 py-2">
-                        <span className="text-sm">{CAT_ICON[a.categoria] ?? '🐄'}</span>
-                        <span className="text-sm font-medium flex-1 truncate">{a.brinco || a.nomeGrupo}</span>
-                        <span className="text-xs text-muted-foreground">{a.categoria}</span>
+                      <button
+                        onClick={() => abrirForm(lote)}
+                        className="flex items-center gap-1 text-xs font-bold"
+                        style={{ color: '#2D6A2F' }}>
+                        <Users className="h-3 w-3" /> Gerenciar animais
+                      </button>
+                    </div>
+                    {animais.length === 0 ? (
+                      <p className="text-xs text-muted-foreground px-4 py-4 italic text-center">
+                        Clique em "Gerenciar animais" para adicionar em massa.
+                      </p>
+                    ) : (
+                      <div className="divide-y max-h-52 overflow-y-auto">
+                        {animais.map(a => (
+                          <div key={a.id} className="flex items-center gap-2 px-4 py-2">
+                            <span className="text-sm shrink-0">{CAT_ICON[a.categoria] ?? '🐄'}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">{a.brinco || a.nomeGrupo}</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {a.categoria}{(a.pesoAtual ?? a.pesoMedio) ? ` · ${a.pesoAtual ?? a.pesoMedio}kg` : ''}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => removerDoLote(a.id)}
+                              title="Remover do lote"
+                              className="p-1 rounded text-muted-foreground hover:text-red-600 hover:bg-red-50 shrink-0">
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
               </div>
@@ -556,21 +652,107 @@ function TabLotes({ db }: { db: ReturnType<typeof useDB>['db'] }) {
         </div>
       )}
 
-      {/* Sheet para criar/editar lote */}
+      {/* ── Sheet criar/editar lote ─────────────────────────────────────── */}
       <Sheet open={sheetOpen} onOpenChange={v => !v && setSheetOpen(false)}>
-        <SheetContent side="bottom" className="rounded-t-2xl">
-          <SheetHeader className="pb-4">
+        <SheetContent side="bottom" className="max-h-[92vh] overflow-y-auto rounded-t-2xl">
+          <SheetHeader className="pb-3">
             <SheetTitle>{editLote ? 'Editar Lote' : 'Novo Lote'}</SheetTitle>
           </SheetHeader>
           <div className="space-y-4 pb-8">
-            <div className="space-y-1">
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Nome do Lote *</Label>
-              <Input placeholder="Ex: Pasto Norte, Curral 1, Recria..." value={nome} onChange={e => setNome(e.target.value)} />
+
+            {/* Nome + Descrição */}
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Nome do Lote *</Label>
+                <Input placeholder="Ex: Pasto Norte, Curral 1, Recria..." value={nome} onChange={e => setNome(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Descrição</Label>
+                <Input placeholder="Opcional" value={descricao} onChange={e => setDescricao(e.target.value)} />
+              </div>
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Descrição</Label>
-              <Input placeholder="Opcional" value={descricao} onChange={e => setDescricao(e.target.value)} />
-            </div>
+
+            {/* Seleção de animais em massa */}
+            {todosVivos.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Animais do lote ({selAnimais.length} selecionado{selAnimais.length !== 1 ? 's' : ''})
+                  </Label>
+                  <div className="flex items-center gap-3">
+                    <button type="button" className="text-xs font-bold underline" style={{ color: '#2D6A2F' }}
+                      onClick={() => {
+                        const newIds = animaisFiltrados.map(a => a.id);
+                        setSelAnimais(s => Array.from(new Set([...s, ...newIds])));
+                      }}>
+                      Sel. todos
+                    </button>
+                    <button type="button" className="text-xs text-muted-foreground underline"
+                      onClick={() => setSelAnimais([])}>
+                      Limpar
+                    </button>
+                  </div>
+                </div>
+
+                {/* Busca + filtro categoria */}
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Buscar brinco ou nome..."
+                    value={buscaAnimal}
+                    onChange={e => setBuscaAnimal(e.target.value)}
+                    className="flex-1 h-8 text-sm"
+                  />
+                  <select
+                    value={filtroCategoria}
+                    onChange={e => setFiltroCategoria(e.target.value)}
+                    className="border rounded-md px-2 text-xs bg-background h-8 shrink-0">
+                    <option value="">Todas</option>
+                    {categorias.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+
+                {/* Lista com checkboxes */}
+                <div className="rounded-xl border divide-y max-h-56 overflow-y-auto">
+                  {animaisFiltrados.length === 0 ? (
+                    <p className="text-xs text-muted-foreground px-3 py-3 text-center italic">Nenhum animal encontrado</p>
+                  ) : animaisFiltrados.map(a => {
+                    const emOutroLote = a.loteId && a.loteId !== editLote?.id;
+                    const nomeOutroLote = emOutroLote ? lotes.find(l => l.id === a.loteId)?.nome : null;
+                    return (
+                      <label key={a.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40">
+                        <input
+                          type="checkbox"
+                          checked={selAnimais.includes(a.id)}
+                          onChange={e => {
+                            if (e.target.checked) setSelAnimais(s => [...s, a.id]);
+                            else setSelAnimais(s => s.filter(x => x !== a.id));
+                          }}
+                          className="w-4 h-4 shrink-0"
+                        />
+                        <span className="text-base shrink-0">{CAT_ICON[a.categoria] ?? '🐄'}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold truncate">{a.brinco || a.nomeGrupo}</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {a.categoria}
+                            {(a.pesoAtual ?? a.pesoMedio) ? ` · ${a.pesoAtual ?? a.pesoMedio}kg` : ''}
+                            {nomeOutroLote && (
+                              <span className="text-amber-600"> · Lote: {nomeOutroLote}</span>
+                            )}
+                          </p>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                {temAnimalEmOutroLote && (
+                  <p className="text-[10px] text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
+                    ⚠ Animais marcados que estão em outro lote serão movidos para este ao salvar.
+                  </p>
+                )}
+              </div>
+            )}
+
             <Button className="w-full font-bold h-11" style={{ background: '#2D6A2F' }} onClick={salvar}>
               {editLote ? 'Salvar Alterações' : 'Criar Lote'}
             </Button>

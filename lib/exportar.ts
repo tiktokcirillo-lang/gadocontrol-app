@@ -572,6 +572,188 @@ export function importarXLSX(file: File): Promise<ImportXLSXResult> {
   });
 }
 
+// ─── Relatório Mensal PDF ─────────────────────────────────────────────────────
+
+const MESES_PT_FULL = [
+  'Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+  'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro',
+];
+
+export function gerarRelatorioMensal(mes: number, ano: number): void {
+  const db      = getDB();
+  const meta    = db.meta ?? {};
+  const fmtD    = (s?: string) => s ? s.split('-').reverse().join('/') : '—';
+  const fmtR    = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const mesStr  = String(mes).padStart(2, '0');
+  const prefix  = `${ano}-${mesStr}`;
+  const nomeMes = `${MESES_PT_FULL[mes - 1]} ${ano}`;
+
+  // Eventos do mês
+  const eventos = (db.eventos ?? []).filter(e => e.data.startsWith(prefix));
+
+  // Nascimentos do mês
+  const nascimentos = eventos.filter(e => e.tipo === 'Nascimento');
+
+  // Mortes do mês
+  const mortes = eventos.filter(e => e.tipo === 'Morte');
+
+  // Pesagens do mês
+  const pesagens = eventos
+    .filter(e => e.tipo === 'Pesagem' && e.peso)
+    .sort((a, b) => a.data.localeCompare(b.data));
+
+  // Eventos sanitários do mês (vacinas, vermífugo, banho)
+  const sanitarios = eventos.filter(e =>
+    e.tipo.startsWith('Vacina') || e.tipo === 'Vermífugo' || e.tipo === 'Banho Carrapaticida'
+  );
+
+  // Financeiro do mês (de lançamentos e eventos com preco)
+  const lancamentos = (db.lancamentos ?? []).filter(l => l.data.startsWith(prefix));
+  const recMes  = lancamentos.filter(l => l.tipo === 'receita').reduce((s, l) => s + l.valor, 0);
+  const despMes = lancamentos.filter(l => l.tipo === 'despesa').reduce((s, l) => s + l.valor, 0);
+  // Vendas do mês (de eventos)
+  const vendasMes = eventos.filter(e => e.tipo === 'Venda' && e.preco);
+  const recVendas = vendasMes.reduce((s, e) => s + (e.preco ?? 0), 0);
+  const recTotal  = recMes + recVendas;
+
+  // GMD médio das pesagens do mês
+  let gmdTotal = 0, gmdCount = 0;
+  const pesagemRows = pesagens.map(e => {
+    const animais = db.animais ?? [];
+    const animal  = animais.find(a =>
+      a.brinco === e.brincoAnimal || a.nomeGrupo === e.brincoAnimal
+    );
+    // Pesa anterior (antes deste mês)
+    const anterior = (db.eventos ?? [])
+      .filter(p =>
+        p.tipo === 'Pesagem' && p.peso &&
+        p.brincoAnimal === e.brincoAnimal &&
+        p.data < e.data
+      )
+      .sort((a, b) => b.data.localeCompare(a.data))[0];
+
+    let gmdStr = '—';
+    if (anterior?.peso && e.peso) {
+      const dias = Math.round((new Date(e.data).getTime() - new Date(anterior.data).getTime()) / 86400000);
+      if (dias > 0) {
+        const gmd = (e.peso - anterior.peso) / dias;
+        gmdStr = gmd.toFixed(3) + ' kg/dia';
+        gmdTotal += gmd; gmdCount++;
+      }
+    }
+
+    return `<tr>
+      <td>${fmtD(e.data)}</td>
+      <td>${e.brincoAnimal}</td>
+      <td>${animal?.categoria ?? '—'}</td>
+      <td style="text-align:right">${e.peso} kg</td>
+      <td style="text-align:right">${gmdStr}</td>
+    </tr>`;
+  }).join('');
+
+  const gmdMedio = gmdCount > 0 ? (gmdTotal / gmdCount).toFixed(3) + ' kg/dia' : '—';
+
+  // Sanit rows
+  const sanitRows = sanitarios.map(e =>
+    `<tr><td>${fmtD(e.data)}</td><td>${e.brincoAnimal}</td><td>${e.tipo}</td><td>${e.detalhes ?? '—'}</td></tr>`
+  ).join('');
+
+  // Resumo eventos por tipo
+  const tipoCount: Record<string, number> = {};
+  eventos.forEach(e => { tipoCount[e.tipo] = (tipoCount[e.tipo] ?? 0) + 1; });
+  const tipoRows = Object.entries(tipoCount)
+    .sort((a, b) => b[1] - a[1])
+    .map(([t, n]) => `<tr><td>${t}</td><td style="text-align:right">${n}</td></tr>`)
+    .join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Relatório Mensal ${nomeMes} — GadoControl</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 12px; color: #1a1a1a; padding: 24px; }
+    h1 { font-size: 20px; color: #2D6A2F; margin-bottom: 4px; }
+    h2 { font-size: 14px; color: #2D6A2F; border-bottom: 1px solid #2D6A2F; margin: 18px 0 8px; padding-bottom: 4px; }
+    .sub { color: #666; font-size: 11px; margin-top: 2px; }
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 8px; }
+    .kpi { border: 1px solid #ddd; border-radius: 8px; padding: 10px; }
+    .kpi .val { font-size: 18px; font-weight: 900; color: #2D6A2F; }
+    .kpi .lbl { font-size: 10px; color: #666; margin-top: 2px; }
+    .fin { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .fin-card { border: 1px solid #ddd; border-radius: 8px; padding: 10px; }
+    .fin-card .val { font-size: 16px; font-weight: 900; }
+    .green { color: #16a34a; }
+    .red   { color: #dc2626; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th { background: #f3f4f6; text-align: left; padding: 6px 8px; font-size: 10px; text-transform: uppercase; color: #666; }
+    td { padding: 5px 8px; border-bottom: 1px solid #f0f0f0; }
+    footer { margin-top: 24px; font-size: 10px; color: #999; text-align: center; border-top: 1px solid #eee; padding-top: 12px; }
+    @media print { body { padding: 16px; } }
+  </style>
+</head>
+<body>
+
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+    <div>
+      <h1>🐄 ${meta.fazNome || 'GadoControl'}</h1>
+      ${meta.fazProprietario ? `<p class="sub">Proprietário: ${meta.fazProprietario}</p>` : ''}
+      ${meta.fazMunicipio ? `<p class="sub">${meta.fazMunicipio}${meta.fazEstado ? ' — ' + meta.fazEstado : ''}</p>` : ''}
+    </div>
+    <div style="text-align:right">
+      <p style="font-weight:bold;font-size:15px">Relatório Mensal</p>
+      <p style="font-size:14px;color:#2D6A2F;font-weight:900">${nomeMes}</p>
+      <p class="sub">Gerado em ${fmtD(today())}</p>
+    </div>
+  </div>
+
+  <h2>Resumo do Mês</h2>
+  <div class="kpis">
+    <div class="kpi"><div class="val">${eventos.length}</div><div class="lbl">Total de Eventos</div></div>
+    <div class="kpi"><div class="val green">${nascimentos.length}</div><div class="lbl">Nascimentos</div></div>
+    <div class="kpi"><div class="val">${pesagens.length}</div><div class="lbl">Pesagens</div></div>
+    <div class="kpi"><div class="val red">${mortes.length}</div><div class="lbl">Mortes</div></div>
+  </div>
+
+  <h2>Financeiro — ${nomeMes}</h2>
+  <div class="fin">
+    <div class="fin-card"><div class="val green">${fmtR(recTotal)}</div><div class="lbl">Receitas (incl. vendas)</div></div>
+    <div class="fin-card"><div class="val red">${fmtR(despMes)}</div><div class="lbl">Despesas</div></div>
+    <div class="fin-card"><div class="val ${recTotal - despMes >= 0 ? 'green' : 'red'}">${fmtR(recTotal - despMes)}</div><div class="lbl">Resultado Líquido</div></div>
+  </div>
+
+  <h2>Eventos por Tipo</h2>
+  ${tipoRows
+    ? `<table><thead><tr><th>Tipo de Evento</th><th style="text-align:right">Qtd.</th></tr></thead><tbody>${tipoRows}</tbody></table>`
+    : '<p class="sub">Nenhum evento no mês.</p>'}
+
+  ${pesagens.length > 0 ? `
+  <h2>Pesagens do Mês (GMD médio: ${gmdMedio})</h2>
+  <table>
+    <thead><tr><th>Data</th><th>Animal</th><th>Categoria</th><th style="text-align:right">Peso</th><th style="text-align:right">GMD</th></tr></thead>
+    <tbody>${pesagemRows}</tbody>
+  </table>` : ''}
+
+  ${sanitarios.length > 0 ? `
+  <h2>Eventos Sanitários</h2>
+  <table>
+    <thead><tr><th>Data</th><th>Animal</th><th>Evento</th><th>Detalhes</th></tr></thead>
+    <tbody>${sanitRows}</tbody>
+  </table>` : ''}
+
+  <footer>
+    GadoControl · Relatório ${nomeMes} · Gerado em ${new Date().toLocaleString('pt-BR')}
+  </footer>
+
+  <script>window.onload = () => { window.print(); }</script>
+</body>
+</html>`;
+
+  const w = window.open('', '_blank');
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
 // ─── helper ───────────────────────────────────────────────────────────────────
 
 function baixar(nome: string, tipo: string, conteudo: string) {

@@ -1,15 +1,20 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Mic, MicOff } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { VoiceButton } from '@/components/shared/VoiceButton';
+import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { useDB } from '@/hooks/useDB';
 import { uid, today } from '@/lib/db';
 import { aplicarEfeitos } from '@/lib/eventos';
+import {
+  vNorm, extrairBrinco, detectarTipoEvento,
+  parseWeightFromSpeech, parseSpeechDate,
+} from '@/lib/vozHelpers';
 import {
   TIPOS_PESO, TIPOS_PRECO_VENDA, TIPOS_CUSTO_OPCIONAL, TIPOS_TOURO,
 } from '@/lib/eventos';
@@ -74,6 +79,60 @@ export function EventoForm({ open, eventoId, brincoFixed, tipoFixed, onClose }: 
   const { db, update } = useDB();
   const [form,   setForm]   = useState(emptyForm());
   const [saving, setSaving] = useState(false);
+  const [vozFeedback, setVozFeedback] = useState('');
+
+  // Voz inteligente — preenche form todo a partir de uma frase
+  const animaisVivos = (db.animais ?? []).filter(a => a.status === 'Vivo');
+
+  function aplicarVozEvento(text: string) {
+    const tln = vNorm(text);
+    const partes: string[] = [];
+
+    // Animal: busca brinco exato primeiro, depois extração
+    let brinco = '';
+    const tu = text.toUpperCase();
+    for (const a of animaisVivos) {
+      const b = (a.brinco || a.nomeGrupo || '').toUpperCase();
+      if (b && tu.includes(b)) { brinco = a.brinco || a.nomeGrupo || ''; break; }
+    }
+    if (!brinco) {
+      const b = extrairBrinco(text);
+      if (b) {
+        const found = animaisVivos.find(a =>
+          (a.brinco || a.nomeGrupo || '').toUpperCase() === b ||
+          (a.brinco || '').toUpperCase().endsWith(b)
+        );
+        brinco = found ? (found.brinco || found.nomeGrupo || '') : b;
+      }
+    }
+
+    const tipo     = detectarTipoEvento(tln);
+    const peso     = parseWeightFromSpeech(text);
+    const data     = parseSpeechDate(text);
+
+    setForm(f => ({
+      ...f,
+      ...(brinco && !brincoFixed ? { brinco } : {}),
+      tipo,
+      ...(peso  ? { peso: String(peso) } : {}),
+      ...(data  ? { data }               : {}),
+    }));
+
+    if (brinco) partes.push('🐄 ' + brinco);
+    else        partes.push('⚠️ Animal não identificado');
+    partes.push('📋 ' + tipo);
+    if (peso)  partes.push('⚖️ ' + peso + ' kg');
+    if (data)  partes.push('📅 ' + data.split('-').reverse().join('/'));
+
+    setVozFeedback(partes.join(' · ') + `\n"${text}"`);
+    if (!brinco) toast.warning('Animal não reconhecido — selecione manualmente.');
+    else         toast.success('Voz reconhecida! Confira e ajuste se necessário.');
+  }
+
+  const { listening, supported: vozSupported, toggle: toggleVoz } = useVoiceInput({
+    onResult: aplicarVozEvento,
+    continuous: false,
+  });
 
   const tipo = form.tipo as EventoTipo | '';
 
@@ -111,6 +170,7 @@ export function EventoForm({ open, eventoId, brincoFixed, tipoFixed, onClose }: 
     if (brincoFixed) f.brinco = brincoFixed;
     if (tipoFixed)   f.tipo   = tipoFixed;
     setForm(f);
+    setVozFeedback('');
   }, [open, eventoId, brincoFixed, tipoFixed]);
 
   const set = (k: keyof ReturnType<typeof emptyForm>, v: string) =>
@@ -210,6 +270,32 @@ export function EventoForm({ open, eventoId, brincoFixed, tipoFixed, onClose }: 
         </SheetHeader>
 
         <div className="space-y-4 pb-8">
+
+          {/* Botão de voz global — preenche todos os campos */}
+          {vozSupported && (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={toggleVoz}
+                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all ${
+                  listening
+                    ? 'bg-red-500 text-white animate-pulse'
+                    : 'bg-muted text-muted-foreground hover:bg-muted/80 border'
+                }`}>
+                {listening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                {listening ? '⏹ Ouvindo... toque para parar' : '🎤 Registrar por Voz'}
+              </button>
+              {vozFeedback && (
+                <div className="rounded-lg border border-green-200 bg-green-50 dark:bg-green-950 px-3 py-2 text-xs text-green-800 dark:text-green-200 whitespace-pre-line">
+                  🎙️ {vozFeedback}
+                </div>
+              )}
+              <p className="text-[10px] text-muted-foreground text-center">
+                Diga: <em>"brinco A001, vacina aftosa, 480 kg, hoje"</em>
+              </p>
+            </div>
+          )}
+
           {/* Animal */}
           <Field label="Animal *">
             {brincoFixed ? (

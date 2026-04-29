@@ -1,9 +1,12 @@
 'use client';
 import { useState, useMemo } from 'react';
 import Link from 'next/link';
+import { Mic, MicOff } from 'lucide-react';
 import { useDB } from '@/hooks/useDB';
 import { getDB, fmtDate } from '@/lib/db';
 import { EventoForm } from '@/components/animals/EventoForm';
+import { useVoiceInput } from '@/hooks/useVoiceInput';
+import { vNorm, extrairBrinco, detectarTipoEvento } from '@/lib/vozHelpers';
 import type { EventoTipo } from '@/lib/types';
 
 // ─── Vacinas como sub-menu ────────────────────────────────────────────────────
@@ -47,6 +50,21 @@ export default function CampoPage() {
   const [brincoFixed,  setBrincoFixed]  = useState<string | undefined>();
   const [showVacinas,  setShowVacinas]  = useState(false);
   const [ultimoBrinco, setUltimoBrinco] = useState<string | undefined>();
+  const [vozFeedback,  setVozFeedback]  = useState('');
+
+  // Voz campo: detecta tipo de evento e brinco, abre EventoForm pré-preenchido
+  function aplicarVozCampo(text: string) {
+    const tln    = vNorm(text);
+    const tipo   = detectarTipoEvento(tln);
+    const brinco = extrairBrinco(text) ?? undefined;
+    setVozFeedback(`🎙️ "${text}" → ${brinco ? '🏷️ ' + brinco + ' · ' : ''}📋 ${tipo}`);
+    abrir(tipo, brinco);
+  }
+
+  const { listening: vozListening, supported: vozSupported, toggle: toggleVoz } = useVoiceInput({
+    onResult: aplicarVozCampo,
+    continuous: false,
+  });
 
   // Últimos 6 eventos registrados (por createdAt desc)
   const ultimosEventos = useMemo(() =>
@@ -90,6 +108,32 @@ export default function CampoPage() {
         <h1 className="text-xl font-black">⚡ Modo Campo</h1>
         <p className="text-xs text-muted-foreground mt-0.5">Registros rápidos para uso no campo</p>
       </div>
+
+      {/* Voz campo */}
+      {vozSupported && (
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={toggleVoz}
+            className={`w-full flex items-center justify-center gap-2 rounded-2xl py-3 text-sm font-bold transition-all shadow-sm ${
+              vozListening
+                ? 'bg-red-500 text-white animate-pulse'
+                : 'bg-muted/70 text-foreground hover:bg-muted'
+            }`}
+          >
+            {vozListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+            {vozListening ? '⏹ Ouvindo...' : '🎤 Registrar por Voz'}
+          </button>
+          {vozFeedback && (
+            <div className="rounded-xl border border-green-200 bg-green-50 dark:bg-green-950/40 dark:border-green-800 px-3 py-2 text-xs text-green-800 dark:text-green-200">
+              {vozFeedback}
+            </div>
+          )}
+          <p className="text-[10px] text-muted-foreground text-center">
+            Diga: &quot;brinco A001 vacina aftosa&quot; ou &quot;pesagem do bezerro B005&quot;
+          </p>
+        </div>
+      )}
 
       {/* Shortcut: último animal registrado */}
       {ultimoBrinco && (

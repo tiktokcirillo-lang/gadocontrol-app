@@ -7,9 +7,10 @@ import {
 import { useDB } from '@/hooks/useDB';
 import { fmtMoney, fmtDate, diffDays, getCabecas, sumCabecas } from '@/lib/db';
 import { CAT_ICON } from '@/lib/types';
+import { gerarRelatorioMensal } from '@/lib/exportar';
 import type { AnimalCategoria } from '@/lib/types';
 
-type Tab = 'rebanho' | 'desempenho' | 'curva' | 'vendas' | 'projecao' | 'lotes';
+type Tab = 'rebanho' | 'desempenho' | 'curva' | 'vendas' | 'projecao' | 'lotes' | 'pdf';
 
 const CORES_CAT: Record<string, string> = {
   Bezerro:   '#f59e0b',
@@ -53,6 +54,7 @@ export default function RelatoriosPage() {
           { key: 'vendas',     label: '💰 Vendas'     },
           { key: 'projecao',   label: '🔮 Projeção'   },
           { key: 'lotes',      label: '🗂 Lotes'      },
+          { key: 'pdf',        label: '📄 PDF Mensal'  },
         ] as { key: Tab; label: string }[]).map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`shrink-0 rounded-md px-3 py-2 text-[11px] font-bold transition-colors ${tab === t.key ? 'text-white' : 'text-muted-foreground'}`}
@@ -68,6 +70,7 @@ export default function RelatoriosPage() {
       {tab === 'vendas'     && <TabVendas     db={db} />}
       {tab === 'projecao'   && <TabProjecao   db={db} />}
       {tab === 'lotes'      && <TabLotes      db={db} />}
+      {tab === 'pdf'        && <TabPDFMensal  />}
     </div>
   );
 }
@@ -915,6 +918,72 @@ function Vazio({ msg }: { msg: string }) {
   return (
     <div className="p-6 text-center">
       <p className="text-sm text-muted-foreground">{msg}</p>
+    </div>
+  );
+}
+
+// ─── Aba PDF Mensal ───────────────────────────────────────────────────────────
+
+const MESES_PT_FULL = [
+  'Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+  'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro',
+];
+
+function TabPDFMensal() {
+  const hoje  = new Date();
+  const [mes, setMes] = useState(hoje.getMonth() + 1);
+  const [ano, setAno] = useState(hoje.getFullYear());
+
+  const anos = Array.from({ length: 5 }, (_, i) => hoje.getFullYear() - i);
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border bg-card p-4 space-y-4">
+        <p className="text-[11px] font-black text-muted-foreground uppercase tracking-widest">
+          Relatório Mensal PDF
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Gera um relatório completo do mês selecionado com eventos, pesagens,
+          GMD, eventos sanitários e resumo financeiro — pronto para impressão.
+        </p>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide">
+              Mês
+            </label>
+            <select
+              value={mes}
+              onChange={e => setMes(Number(e.target.value))}
+              className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+            >
+              {MESES_PT_FULL.map((m, i) => (
+                <option key={i + 1} value={i + 1}>{m}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide">
+              Ano
+            </label>
+            <select
+              value={ano}
+              onChange={e => setAno(Number(e.target.value))}
+              className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+            >
+              {anos.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <button
+          onClick={() => gerarRelatorioMensal(mes, ano)}
+          className="w-full rounded-xl py-3 text-sm font-bold text-white transition-colors hover:opacity-90"
+          style={{ background: '#2D6A2F' }}
+        >
+          📄 Gerar PDF — {MESES_PT_FULL[mes - 1]} {ano}
+        </button>
+      </div>
     </div>
   );
 }

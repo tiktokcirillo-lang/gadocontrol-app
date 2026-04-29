@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Mic, MicOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,11 +13,15 @@ import {
 } from '@/components/ui/sheet';
 import { VoiceButton } from '@/components/shared/VoiceButton';
 import { PhotoCapture } from '@/components/shared/PhotoCapture';
+import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { useDB } from '@/hooks/useDB';
 import { useAuth } from '@/contexts/AuthContext';
 import { uid, today, sumCabecas } from '@/lib/db';
 import { PLAN_LIMIT_FREE } from '@/lib/types';
 import type { Animal, AnimalCategoria, AnimalSexo, AnimalTipo } from '@/lib/types';
+import {
+  vNorm, extrairBrinco, detectarCategoria, detectarRaca, parseWeightFromSpeech,
+} from '@/lib/vozHelpers';
 
 interface Props {
   open:       boolean;
@@ -48,9 +52,58 @@ function emptyForm() {
 export function AnimalForm({ open, animalId, onClose }: Props) {
   const { db, update } = useDB();
   const { plan, user } = useAuth();
-  const [mode,    setMode]    = useState<Mode>('individual');
-  const [form,    setForm]    = useState(emptyForm());
-  const [saving,  setSaving]  = useState(false);
+  const [mode,       setMode]       = useState<Mode>('individual');
+  const [form,       setForm]       = useState(emptyForm());
+  const [saving,     setSaving]     = useState(false);
+  const [vozFeedback, setVozFeedback] = useState('');
+
+  // ── Voz inteligente para cadastro de animal ────────────────────────────────
+  function aplicarVozAnimal(text: string) {
+    const tln    = vNorm(text);
+    const partes: string[] = [];
+
+    const categoria = detectarCategoria(tln);
+    const raca      = detectarRaca(tln);
+    const peso      = parseWeightFromSpeech(text);
+    const brinco    = extrairBrinco(text);
+
+    // Sexo: inferido da categoria ou palavras diretas
+    let sexo: AnimalSexo | '' = '';
+    if (tln.includes('macho'))  sexo = 'Macho';
+    else if (tln.includes('femea') || tln.includes('fêmea')) sexo = 'Fêmea';
+    else if (['Bezerra','Novilha','Matriz'].includes(categoria)) sexo = 'Fêmea';
+    else if (['Bezerro','Novilho','Touro','Boi'].includes(categoria)) sexo = 'Macho';
+
+    // Mãe: "filha de A001" / "mãe B002" / "da vaca X"
+    const maeM = text.match(/(?:m[aã]e|filha de|da vaca)\s+([A-Za-z0-9]+)/i);
+    const mae  = maeM ? maeM[1].toUpperCase() : '';
+
+    setForm(f => ({
+      ...f,
+      ...(brinco    ? { brinco }              : {}),
+      ...(categoria ? { categoria }           : {}),
+      ...(sexo      ? { sexo }                : {}),
+      ...(raca      ? { raca }                : {}),
+      ...(peso      ? { pesoAtual: String(peso) } : {}),
+      ...(mae       ? { mae }                 : {}),
+    }));
+
+    if (brinco)    partes.push('🏷️ ' + brinco);
+    else           partes.push('⚠️ Brinco não identificado');
+    partes.push('📂 ' + categoria);
+    if (raca)  partes.push('🌾 ' + raca);
+    if (peso)  partes.push('⚖️ ' + peso + ' kg');
+    if (mae)   partes.push('🐄 Mãe: ' + mae);
+
+    setVozFeedback(partes.join(' · ') + `\n"${text}"`);
+    if (!brinco) toast.warning('Brinco não reconhecido — preencha manualmente.');
+    else         toast.success('Voz reconhecida! Confira e ajuste se necessário.');
+  }
+
+  const { listening: vozListening, supported: vozSupported, toggle: toggleVoz } = useVoiceInput({
+    onResult: aplicarVozAnimal,
+    continuous: false,
+  });
 
   // Carrega dados ao editar
   useEffect(() => {
@@ -215,6 +268,32 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
         )}
 
         <div className="space-y-4 pb-6">
+          {/* Voz inteligente */}
+          {vozSupported && (
+            <div className="space-y-2 pb-1">
+              <button
+                type="button"
+                onClick={toggleVoz}
+                className={`w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all ${
+                  vozListening
+                    ? 'bg-red-500 text-white animate-pulse'
+                    : 'bg-muted/60 text-foreground hover:bg-muted'
+                }`}
+              >
+                {vozListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                {vozListening ? '⏹ Ouvindo...' : '🎤 Cadastrar por Voz'}
+              </button>
+              {vozFeedback && (
+                <div className="rounded-lg border border-green-200 bg-green-50 dark:bg-green-950/40 dark:border-green-800 px-3 py-2 text-xs text-green-800 dark:text-green-200 whitespace-pre-line">
+                  🎙️ {vozFeedback}
+                </div>
+              )}
+              <p className="text-[10px] text-muted-foreground text-center">
+                Diga: &quot;bezerra Nelore brinco B002 peso 120kg filha de A001&quot;
+              </p>
+            </div>
+          )}
+
           {/* Identificação */}
           {mode === 'individual' ? (
             <Field label="Brinco / Identificação *">

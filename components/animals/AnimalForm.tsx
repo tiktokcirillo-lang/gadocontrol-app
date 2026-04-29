@@ -20,7 +20,7 @@ import { uid, today, sumCabecas } from '@/lib/db';
 import { PLAN_LIMIT_FREE } from '@/lib/types';
 import type { Animal, AnimalCategoria, AnimalSexo, AnimalTipo } from '@/lib/types';
 import {
-  vNorm, extrairBrinco, detectarCategoria, detectarRaca, parseWeightFromSpeech,
+  vNorm, extrairBrinco, detectarCategoria, detectarRaca, parseWeightFromSpeech, parseSpeechDate,
 } from '@/lib/vozHelpers';
 
 interface Props {
@@ -59,13 +59,12 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
 
   // ── Voz inteligente para cadastro de animal ────────────────────────────────
   function aplicarVozAnimal(text: string) {
-    const tln    = vNorm(text);
+    const tln      = vNorm(text);
     const partes: string[] = [];
-
     const categoria = detectarCategoria(tln);
     const raca      = detectarRaca(tln);
     const peso      = parseWeightFromSpeech(text);
-    const brinco    = extrairBrinco(text);
+    const dataNasc  = parseSpeechDate(text);
 
     // Sexo: inferido da categoria ou palavras diretas
     let sexo: AnimalSexo | '' = '';
@@ -74,30 +73,67 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
     else if (['Bezerra','Novilha','Matriz'].includes(categoria)) sexo = 'Fêmea';
     else if (['Bezerro','Novilho','Touro','Boi'].includes(categoria)) sexo = 'Macho';
 
-    // Mãe: "filha de A001" / "mãe B002" / "da vaca X"
-    const maeM = text.match(/(?:m[aã]e|filha de|da vaca)\s+([A-Za-z0-9]+)/i);
-    const mae  = maeM ? maeM[1].toUpperCase() : '';
+    if (mode === 'grupo') {
+      // ── Modo Grupo: extrai nome do lote/grupo e nº de cabeças ──
+      // "lote Norte", "grupo dos Nelores", "nome Fazenda X"
+      const nomeLoteM = text.match(
+        /(?:lote|grupo|nome[:\s]+)\s*([A-Za-zÀ-ú0-9][A-Za-zÀ-ú0-9 ]{0,40}?)(?:\s+(?:\d|$|nelore|angus|brahman|gir|boi|vaca|touro))/i
+      ) ?? text.match(/(?:lote|grupo)\s+([A-Za-zÀ-ú0-9 ]+)/i);
+      const nomeGrupo = nomeLoteM ? nomeLoteM[1].trim() : '';
 
-    setForm(f => ({
-      ...f,
-      ...(brinco    ? { brinco }              : {}),
-      ...(categoria ? { categoria }           : {}),
-      ...(sexo      ? { sexo }                : {}),
-      ...(raca      ? { raca }                : {}),
-      ...(peso      ? { pesoAtual: String(peso) } : {}),
-      ...(mae       ? { mae }                 : {}),
-    }));
+      // "50 cabeças" / "vinte animais"
+      const cabM       = text.match(/(\d+)\s*(?:cabe[çc]as?|animais?|bovinos?|cab\.?)/i);
+      const qtdCabecas = cabM ? cabM[1] : '';
 
-    if (brinco)    partes.push('🏷️ ' + brinco);
-    else           partes.push('⚠️ Brinco não identificado');
-    partes.push('📂 ' + categoria);
-    if (raca)  partes.push('🌾 ' + raca);
-    if (peso)  partes.push('⚖️ ' + peso + ' kg');
-    if (mae)   partes.push('🐄 Mãe: ' + mae);
+      setForm(f => ({
+        ...f,
+        ...(nomeGrupo  ? { nomeGrupo }                   : {}),
+        ...(qtdCabecas ? { qtdCabecas }                  : {}),
+        ...(categoria  ? { categoria }                   : {}),
+        ...(raca       ? { raca }                        : {}),
+        ...(peso       ? { pesoMedio: String(peso) }     : {}),
+      }));
 
-    setVozFeedback(partes.join(' · ') + `\n"${text}"`);
-    if (!brinco) toast.warning('Brinco não reconhecido — preencha manualmente.');
-    else         toast.success('Voz reconhecida! Confira e ajuste se necessário.');
+      if (nomeGrupo)   partes.push('🗂 ' + nomeGrupo);
+      else             partes.push('⚠️ Nome do grupo não identificado');
+      partes.push('📂 ' + categoria);
+      if (qtdCabecas)  partes.push('🔢 ' + qtdCabecas + ' cab.');
+      if (raca)        partes.push('🌾 ' + raca);
+      if (peso)        partes.push('⚖️ ' + peso + ' kg');
+
+      setVozFeedback(partes.join(' · ') + `\n"${text}"`);
+      if (!nomeGrupo) toast.warning('Nome do grupo não reconhecido — preencha manualmente.');
+      else            toast.success('Voz reconhecida! Confira e ajuste se necessário.');
+
+    } else {
+      // ── Modo Individual: extrai brinco, data de nascimento e mãe ──
+      const brinco = extrairBrinco(text);
+      const maeM   = text.match(/(?:m[aã]e|filha de|da vaca)\s+([A-Za-z0-9]+)/i);
+      const mae    = maeM ? maeM[1].toUpperCase() : '';
+
+      setForm(f => ({
+        ...f,
+        ...(brinco   ? { brinco }                     : {}),
+        ...(categoria? { categoria }                  : {}),
+        ...(sexo     ? { sexo }                       : {}),
+        ...(raca     ? { raca }                       : {}),
+        ...(peso     ? { pesoAtual: String(peso) }    : {}),
+        ...(dataNasc ? { dataNascimento: dataNasc }   : {}),
+        ...(mae      ? { mae }                        : {}),
+      }));
+
+      if (brinco)   partes.push('🏷️ ' + brinco);
+      else          partes.push('⚠️ Brinco não identificado');
+      partes.push('📂 ' + categoria);
+      if (raca)     partes.push('🌾 ' + raca);
+      if (peso)     partes.push('⚖️ ' + peso + ' kg');
+      if (dataNasc) partes.push('📅 ' + dataNasc.split('-').reverse().join('/'));
+      if (mae)      partes.push('🐄 Mãe: ' + mae);
+
+      setVozFeedback(partes.join(' · ') + `\n"${text}"`);
+      if (!brinco) toast.warning('Brinco não reconhecido — preencha manualmente.');
+      else         toast.success('Voz reconhecida! Confira e ajuste se necessário.');
+    }
   }
 
   const { listening: vozListening, supported: vozSupported, toggle: toggleVoz } = useVoiceInput({
@@ -247,7 +283,7 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
         {!animalId && (
           <div className="flex rounded-lg border p-1 mb-4 gap-1">
             <button
-              onClick={() => setMode('individual')}
+              onClick={() => { setMode('individual'); setVozFeedback(''); }}
               className={`flex-1 rounded-md py-1.5 text-sm font-semibold transition-colors ${
                 mode === 'individual' ? 'text-white' : 'text-muted-foreground'
               }`}
@@ -256,7 +292,7 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
               Individual
             </button>
             <button
-              onClick={() => setMode('grupo')}
+              onClick={() => { setMode('grupo'); setVozFeedback(''); }}
               className={`flex-1 rounded-md py-1.5 text-sm font-semibold transition-colors ${
                 mode === 'grupo' ? 'text-white' : 'text-muted-foreground'
               }`}
@@ -289,7 +325,9 @@ export function AnimalForm({ open, animalId, onClose }: Props) {
                 </div>
               )}
               <p className="text-[10px] text-muted-foreground text-center">
-                Diga: &quot;bezerra Nelore brinco B002 peso 120kg filha de A001&quot;
+                {mode === 'grupo'
+                  ? 'Diga: "lote Norte Nelore 50 cabeças 420 kg"'
+                  : 'Diga: "bezerra Nelore brinco B002 peso 120kg nascida ontem filha de A001"'}
               </p>
             </div>
           )}

@@ -23,7 +23,10 @@ export const TIPOS_TOURO: EventoTipo[] = ['Inseminação Artificial', 'Cobertura
 
 // Aplica efeitos no animal após registrar evento
 export function aplicarEfeitos(db: DB, ev: Evento): void {
-  const idx = db.animais.findIndex(a => a.brinco === ev.brincoAnimal);
+  const id  = ev.brincoAnimal?.toUpperCase() ?? '';
+  const idx = db.animais.findIndex(
+    a => (a.brinco?.toUpperCase() === id) || (a.nomeGrupo?.toUpperCase() === id),
+  );
   if (idx === -1) return;
   const a = { ...db.animais[idx] };
 
@@ -119,16 +122,42 @@ export function calcReceitas(db: DB, de?: string | null, ate?: string | null) {
     desc: string; valor: number; data: string; origem: 'auto' | 'manual';
   }> = [];
 
+  // IDs de animais já contabilizados via status 'Vendido' (evita dupla contagem)
+  const jaContados = new Set<string>();
+
   (db.animais ?? [])
     .filter(a => a.status === 'Vendido' && (a.precoVenda ?? 0) > 0)
     .forEach(a => {
       const data = a.dataVenda ?? '';
       if (de  && data && data < de)  return;
       if (ate && data && data > ate) return;
+      const ident  = a.brinco || a.nomeGrupo || '—';
+      const qtdStr = a.tipo === 'grupo' && a.qtdCabecas ? ` (${a.qtdCabecas} cab.)` : '';
       itens.push({
         id: 'venda_' + a.id, tipo: 'receita', cat: 'Venda de Animal',
-        desc: a.brinco + (a.categoria ? ' — ' + a.categoria : ''),
+        desc: ident + qtdStr + (a.categoria ? ' — ' + a.categoria : ''),
         valor: a.precoVenda!, data, origem: 'auto',
+      });
+      jaContados.add((ident).toUpperCase());
+    });
+
+  // Fallback: eventos de Venda com preco onde o efeito não foi aplicado (dados antigos / bug de lote)
+  (db.eventos ?? [])
+    .filter(e => e.tipo === 'Venda' && (e.preco ?? 0) > 0)
+    .forEach(e => {
+      const id = (e.brincoAnimal ?? '').toUpperCase();
+      if (jaContados.has(id)) return; // já contabilizado via animal.precoVenda
+      if (de  && e.data < de)  return;
+      if (ate && e.data > ate) return;
+      const animal = (db.animais ?? []).find(
+        a => a.brinco?.toUpperCase() === id || a.nomeGrupo?.toUpperCase() === id,
+      );
+      const qtdStr = animal?.tipo === 'grupo' && animal.qtdCabecas
+        ? ` (${animal.qtdCabecas} cab.)` : '';
+      itens.push({
+        id: 'evt_venda_' + e.id, tipo: 'receita', cat: 'Venda de Animal',
+        desc: (e.brincoAnimal ?? '—') + qtdStr + (animal?.categoria ? ' — ' + animal.categoria : ''),
+        valor: e.preco!, data: e.data, origem: 'auto',
       });
     });
 

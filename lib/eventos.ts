@@ -1,5 +1,5 @@
 import type { DB, Evento, EventoTipo, Animal } from './types';
-import { GESTACAO_DIAS, TIPO_CAT_DESPESA } from './types';
+import { GESTACAO_DIAS, TIPO_CAT_DESPESA, ARROBA_KG } from './types';
 import { addDias } from './db';
 
 // Tipos que mostram campo de peso
@@ -41,9 +41,50 @@ export function aplicarEfeitos(db: DB, ev: Evento): void {
       a.dataVenda  = ev.data;
       if (ev.preco) a.precoVenda = ev.preco;
       break;
-    case 'Morte':
+    case 'Morte': {
       a.status = 'Morto';
+
+      // ── Calcula perda financeira e registra como lançamento de despesa ──
+      // Idempotente: usa ID determinístico para evitar duplicação.
+      const lancId = `morte_${ev.id}`;
+      const jaExiste = (db.lancamentos ?? []).some(l => l.id === lancId);
+
+      if (!jaExiste) {
+        const cabecas      = a.tipo === 'grupo' ? (a.qtdCabecas ?? 1) : 1;
+        const pesoUnitario = a.pesoAtual ?? a.pesoMedio;
+        const precoArroba  = db.meta?.precoArroba;
+        const ident        = a.brinco || a.nomeGrupo || '—';
+
+        let valorPerdido = 0;
+        let obsCalculo   = '';
+
+        if (pesoUnitario && precoArroba) {
+          // Valor de mercado: peso vivo × rendimento 50% → arrobas × preço
+          const arrobasUnit = (pesoUnitario * 0.5) / ARROBA_KG;
+          valorPerdido = arrobasUnit * cabecas * precoArroba;
+          obsCalculo   = `${pesoUnitario}kg/cab × ${cabecas} cab = ${(pesoUnitario * cabecas).toFixed(0)}kg → ${(arrobasUnit * cabecas).toFixed(1)}@ × R$${precoArroba}/@ (rend. 50%)`;
+        } else if (a.precoCompra) {
+          // Fallback: custo de aquisição como proxy do prejuízo
+          valorPerdido = a.precoCompra * cabecas;
+          obsCalculo   = `Custo de aquisição (sem peso ou preço de arroba configurado)`;
+        }
+
+        if (valorPerdido > 0) {
+          if (!db.lancamentos) db.lancamentos = [];
+          db.lancamentos.push({
+            id:         lancId,
+            tipo:       'despesa',
+            cat:        'Perda por Morte',
+            descricao:  `Morte — ${ident}${cabecas > 1 ? ` (${cabecas} cab.)` : ''}`,
+            valor:      Math.round(valorPerdido * 100) / 100,
+            data:       ev.data,
+            obs:        obsCalculo,
+            createdAt:  new Date().toISOString(),
+          });
+        }
+      }
       break;
+    }
     case 'Pesagem':
       if (ev.peso) a.pesoAtual = ev.peso;
       break;

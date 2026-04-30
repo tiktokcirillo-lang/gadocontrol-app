@@ -5,7 +5,7 @@ import { Printer, ChevronDown, ChevronRight, TrendingUp, TrendingDown } from 'lu
 import { CAT_ICON } from '@/lib/types';
 import { fmtDate, fmtMoney, getCabecas, idadeMeses } from '@/lib/db';
 import { imprimirAnimal } from '@/lib/exportar';
-import type { Animal, Evento } from '@/lib/types';
+import type { Animal, Evento, Lancamento } from '@/lib/types';
 
 // ─── Ícones por tipo de evento ────────────────────────────────────────────────
 const EV_ICON: Record<string, string> = {
@@ -75,12 +75,13 @@ function evDetalhes(ev: Evento): string[] {
 interface Props {
   animal:      Animal | null;
   eventos:     Evento[];
+  lancamentos: Lancamento[];
   onClose:     () => void;
   onEdit:      (id: string) => void;
   onNewEvento: (brinco: string) => void;
 }
 
-export function AnimalDetail({ animal, eventos, onClose, onEdit, onNewEvento }: Props) {
+export function AnimalDetail({ animal, eventos, lancamentos, onClose, onEdit, onNewEvento }: Props) {
   const [showAllEvs, setShowAllEvs] = useState(false);
 
   if (!animal) return null;
@@ -104,6 +105,12 @@ export function AnimalDetail({ animal, eventos, onClose, onEdit, onNewEvento }: 
     .reduce((s, e) => s + (e.preco ?? 0), 0);
   const temLucro    = (precoCompra > 0 || custoEventos > 0) && precoVenda > 0;
   const lucroTotal  = precoVenda - precoCompra - custoEventos;
+
+  // Perda por morte — lançamento gerado automaticamente pelo aplicarEfeitos
+  const morteEvId   = evs.find(e => e.tipo === 'Morte')?.id;
+  const lancMorte   = morteEvId
+    ? lancamentos.find(l => l.id === `morte_${morteEvId}`)
+    : null;
 
   return (
     <Sheet open={!!animal} onOpenChange={v => !v && onClose()}>
@@ -163,6 +170,42 @@ export function AnimalDetail({ animal, eventos, onClose, onEdit, onNewEvento }: 
               {animal.dataVenda  && <Row label="Data Venda"  value={fmtDate(animal.dataVenda)} />}
               {animal.precoVenda && <Row label="Preço Venda" value={fmtMoney(animal.precoVenda)} />}
             </Section>
+          )}
+
+          {/* Perda por Morte */}
+          {animal.status === 'Morto' && (
+            <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/30 p-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <TrendingDown className="h-4 w-4 text-red-700" />
+                <p className="text-[11px] font-black uppercase tracking-widest text-red-700">
+                  Perda estimada por morte
+                </p>
+              </div>
+              {lancMorte ? (
+                <div className="space-y-1 text-xs">
+                  <div className="flex justify-between font-black text-sm text-red-800">
+                    <span>Valor perdido</span>
+                    <span>{fmtMoney(lancMorte.valor)}</span>
+                  </div>
+                  {lancMorte.obs && (
+                    <p className="text-[10px] text-red-600 pt-1">{lancMorte.obs}</p>
+                  )}
+                  {precoCompra > 0 && (
+                    <div className="flex justify-between text-red-700 pt-1 border-t border-red-200">
+                      <span>Custo total (compra + eventos)</span>
+                      <span>{fmtMoney(precoCompra + custoEventos)}</span>
+                    </div>
+                  )}
+                  <p className="text-[10px] text-red-500 pt-0.5">
+                    * Lançado automaticamente em Financeiro → Despesas.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-red-700">
+                  Sem peso ou preço/@ configurado — configure em Gestão → Metas para calcular automaticamente.
+                </p>
+              )}
+            </div>
           )}
 
           {/* Lucratividade */}

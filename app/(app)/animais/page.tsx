@@ -189,7 +189,7 @@ export default function AnimaisPage() {
       <AnimalForm open={formOpen} animalId={editId}
         onClose={() => { setFormOpen(false); setEditId(null); }} />
 
-      <AnimalDetail animal={detailAnimal} eventos={db.eventos ?? []}
+      <AnimalDetail animal={detailAnimal} eventos={db.eventos ?? []} lancamentos={db.lancamentos ?? []}
         onClose={() => setDetailId(null)}
         onEdit={id => { setDetailId(null); openEdit(id); }}
         onNewEvento={openEvento} />

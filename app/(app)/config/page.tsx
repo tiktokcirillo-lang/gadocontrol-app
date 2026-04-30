@@ -2,8 +2,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Save, Download, Upload, FileText, FileJson, AlertTriangle, Copy, RefreshCw, CloudUpload, CloudDownload, Wifi, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { doc, deleteDoc } from 'firebase/firestore';
-import { db as firestore } from '@/lib/firebase';
 import { useDB } from '@/hooks/useDB';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
@@ -81,14 +79,17 @@ export default function ConfigPage() {
 
     setResetting(true);
     try {
-      // 1. Limpa localStorage
+      // 1. Salva DB vazio no localStorage imediatamente
       saveDB(emptyDB());
 
-      // 2. Remove documento do Firestore
-      if (user) {
-        try {
-          await deleteDoc(doc(firestore, 'farms', user.uid, 'data', 'snapshot'));
-        } catch { /* ignora se não existia */ }
+      // 2. Sobe o DB vazio para o Firestore (sobrescreve qualquer dado existente).
+      //    Usamos publishToCloud() que já lê do localStorage (agora vazio) e faz o push.
+      //    Isso é mais confiável que deleteDoc pois usa permissão de escrita (não delete).
+      try {
+        await publishToCloud();
+      } catch {
+        // Se falhar (ex: regras não publicadas ainda), o localStorage já está vazio.
+        // O sync futuro não vai restaurar dados porque o local estará mais recente (updatedAt novo).
       }
 
       toast.success('Todos os dados foram apagados. Recarregando...');

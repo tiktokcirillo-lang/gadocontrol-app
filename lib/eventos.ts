@@ -69,19 +69,20 @@ export function aplicarEfeitos(db: DB, ev: Evento): void {
           obsCalculo   = `Custo de aquisição (sem peso ou preço de arroba configurado)`;
         }
 
-        if (valorPerdido > 0) {
-          if (!db.lancamentos) db.lancamentos = [];
-          db.lancamentos.push({
-            id:         lancId,
-            tipo:       'despesa',
-            cat:        'Perda por Morte',
-            descricao:  `Morte — ${ident}${cabecas > 1 ? ` (${cabecas} cab.)` : ''}`,
-            valor:      Math.round(valorPerdido * 100) / 100,
-            data:       ev.data,
-            obs:        obsCalculo,
-            createdAt:  new Date().toISOString(),
-          });
+        if (!obsCalculo) {
+          obsCalculo = 'Sem peso ou preço/@ configurado — edite em Gestão → Metas.';
         }
+        if (!db.lancamentos) db.lancamentos = [];
+        db.lancamentos.push({
+          id:         lancId,
+          tipo:       'despesa',
+          cat:        'Perda por Morte',
+          descricao:  `Morte — ${ident}${cabecas > 1 ? ` (${cabecas} cab.)` : ''}`,
+          valor:      Math.round(valorPerdido * 100) / 100,
+          data:       ev.data,
+          obs:        obsCalculo,
+          createdAt:  new Date().toISOString(),
+        });
       }
       break;
     }
@@ -211,6 +212,55 @@ export function calcReceitas(db: DB, de?: string | null, ate?: string | null) {
     });
 
   return itens.sort((a, b) => b.data.localeCompare(a.data));
+}
+
+// Migração retroativa: gera lancamentos de morte para eventos que não têm um
+export function repararMorteLancamentos(db: DB): boolean {
+  let alterou = false;
+
+  (db.eventos ?? []).forEach(ev => {
+    if (ev.tipo !== 'Morte') return;
+    const lancId = `morte_${ev.id}`;
+    if ((db.lancamentos ?? []).some(l => l.id === lancId)) return;
+
+    const id     = (ev.brincoAnimal ?? '').toUpperCase();
+    const animal = (db.animais ?? []).find(
+      a => a.brinco?.toUpperCase() === id || a.nomeGrupo?.toUpperCase() === id,
+    );
+    const ident        = animal?.brinco || animal?.nomeGrupo || ev.brincoAnimal || '—';
+    const cabecas      = animal?.tipo === 'grupo' ? (animal.qtdCabecas ?? 1) : 1;
+    const pesoUnitario = animal?.pesoAtual ?? animal?.pesoMedio;
+    const precoArroba  = db.meta?.precoArroba;
+
+    let valorPerdido = 0;
+    let obsCalculo   = '';
+
+    if (pesoUnitario && precoArroba) {
+      const arrobasUnit = (pesoUnitario * 0.5) / ARROBA_KG;
+      valorPerdido = arrobasUnit * cabecas * precoArroba;
+      obsCalculo   = `${pesoUnitario}kg/cab × ${cabecas} cab → ${(arrobasUnit * cabecas).toFixed(1)}@ × R$${precoArroba}/@ (rend. 50%) [retroativo]`;
+    } else if (animal?.precoCompra) {
+      valorPerdido = animal.precoCompra * cabecas;
+      obsCalculo   = `Custo de aquisição [retroativo]`;
+    } else {
+      obsCalculo   = 'Sem peso ou preço/@ configurado — edite em Gestão → Metas.';
+    }
+
+    if (!db.lancamentos) db.lancamentos = [];
+    db.lancamentos.push({
+      id:        lancId,
+      tipo:      'despesa',
+      cat:       'Perda por Morte',
+      descricao: `Morte — ${ident}${cabecas > 1 ? ` (${cabecas} cab.)` : ''}`,
+      valor:     Math.round(valorPerdido * 100) / 100,
+      data:      ev.data,
+      obs:       obsCalculo,
+      createdAt: new Date().toISOString(),
+    });
+    alterou = true;
+  });
+
+  return alterou;
 }
 
 // Datas de período (sem bug de timezone)

@@ -5,6 +5,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { auth, db as firestore } from '@/lib/firebase';
 import { puxarDados, publicarDados } from '@/lib/members';
 import { getDB, saveDB } from '@/lib/db';
+import { repararMorteLancamentos } from '@/lib/eventos';
 import type { DB } from '@/lib/types';
 
 /**
@@ -125,7 +126,9 @@ function initCloudSync(): Promise<void> {
 export function useDB() {
   const [db,      setDB]      = useState<DB>(() => {
     const data = getDB();
-    if (repararStatusAnimais(data)) saveDB(data);
+    let dirty = repararStatusAnimais(data);
+    if (repararMorteLancamentos(data)) dirty = true;
+    if (dirty) saveDB(data);
     return data;
   });
   const [version, setVersion] = useState(0);
@@ -133,7 +136,11 @@ export function useDB() {
   // Na primeira montagem: aguarda sync do Firestore e atualiza estado local
   useEffect(() => {
     initCloudSync().then(() => {
-      setDB({ ...getDB() });
+      const synced = getDB();
+      let dirty = repararStatusAnimais(synced);
+      if (repararMorteLancamentos(synced)) dirty = true;
+      if (dirty) saveDB(synced);
+      setDB({ ...synced });
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

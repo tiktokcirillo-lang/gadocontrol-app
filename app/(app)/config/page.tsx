@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { exportarJSON, importarJSON, exportarCSVFinanceiro, abrirRelatorioPDF, exportarXLSX, importarXLSX } from '@/lib/exportar';
-import { emptyDB, fmtDate, saveDB } from '@/lib/db';
+import { emptyDB, fmtDate, getDB, saveDB } from '@/lib/db';
 import { gerarDemoDB } from '@/lib/demoData';
 import { TeamManager } from '@/components/config/TeamManager';
 import { gerarCodigo, publicarCodigo } from '@/lib/codigoPeao';
@@ -113,6 +113,17 @@ export default function ConfigPage() {
     toast.success('Dados da fazenda salvos!');
   }
 
+  // Após qualquer operação que escreve diretamente no localStorage (import, demo),
+  // precisamos: (1) carimbar updatedAt para vencer o Firestore no próximo sync,
+  // e (2) fazer push imediato para o Firestore, evitando que o sync do reload
+  // sobrescreva o localStorage com dados antigos da nuvem.
+  async function syncAposEscritaLocal() {
+    const local = getDB();
+    local.meta  = { ...local.meta, updatedAt: new Date().toISOString() };
+    saveDB(local);
+    try { await publishToCloud(); } catch { /* sem regras ou offline — updatedAt já protege */ }
+  }
+
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -120,6 +131,7 @@ export default function ConfigPage() {
     setImporting(true);
     try {
       await importarJSON(file);
+      await syncAposEscritaLocal();
       toast.success('Backup restaurado com sucesso! Recarregando...');
       setTimeout(() => window.location.reload(), 1200);
     } catch (err: unknown) {
@@ -136,6 +148,7 @@ export default function ConfigPage() {
     setXlsxImporting(true);
     try {
       const res = await importarXLSX(file);
+      await syncAposEscritaLocal();
       toast.success(
         `Importação concluída: ${res.adicionados} adicionados, ${res.atualizados} atualizados.`
       );
@@ -335,10 +348,11 @@ export default function ConfigPage() {
             <strong className="text-foreground"> Substitui todos os dados atuais.</strong>
           </p>
           <button
-            onClick={() => {
+            onClick={async () => {
               if (!confirm('Isso vai substituir TODOS os dados atuais pelos dados de exemplo. Confirmar?')) return;
               try {
                 saveDB(gerarDemoDB());
+                await syncAposEscritaLocal();
                 toast.success('Dados de exemplo carregados!');
                 setTimeout(() => window.location.reload(), 800);
               } catch {

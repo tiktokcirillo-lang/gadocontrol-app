@@ -177,6 +177,8 @@ export interface Meta {
   lastBackup?: string;
   onboardingDone?: boolean;
   demoLoaded?: boolean;
+  updatedAt?: string;   // ISO — usado para resolução de conflito no sync
+  syncedAt?: string;    // ISO — última sincronização bem-sucedida com Firestore
   // Fazenda
   fazNome?: string;
   fazProprietario?: string;

@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
-import { Save, Download, Upload, FileText, FileJson, AlertTriangle, Copy, RefreshCw } from 'lucide-react';
+import { Save, Download, Upload, FileText, FileJson, AlertTriangle, Copy, RefreshCw, CloudUpload, CloudDownload, Wifi } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDB } from '@/hooks/useDB';
 import { useAuth } from '@/contexts/AuthContext';
@@ -20,7 +20,8 @@ const ESTADOS_BR = [
 ];
 
 export default function ConfigPage() {
-  const { db, update } = useDB();
+  const { db, update, publishToCloud, pullFromCloud } = useDB();
+  const [syncing, setSyncing] = useState<'idle' | 'uploading' | 'downloading'>('idle');
   const { user } = useAuth();
   const meta = db.meta ?? {};
   const [codigoFaz, setCodigoFaz] = useState<string>('');
@@ -217,6 +218,82 @@ export default function ConfigPage() {
             cor="#15803d"
             onClick={() => { exportarXLSX(); toast.success('Planilha Excel exportada!'); }}
           />
+        </div>
+      </Section>
+
+      {/* ── Sincronização com a Nuvem ─────────────────────────────────── */}
+      <Section title="☁️ Sincronização com a Nuvem">
+        <div className="p-4 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Use estes botões para forçar a sincronização entre este aparelho e a nuvem.
+            Útil ao trocar de dispositivo ou após corrigir dados.
+          </p>
+
+          {/* Status do último sync */}
+          {db.meta?.syncedAt && (
+            <div className="flex items-center gap-2 rounded-xl bg-green-50 border border-green-200 px-3 py-2">
+              <Wifi className="h-3.5 w-3.5 text-green-600 shrink-0" />
+              <p className="text-xs text-green-800">
+                Última sincronização: {new Date(db.meta.syncedAt).toLocaleString('pt-BR')}
+              </p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            {/* Enviar para a nuvem */}
+            <button
+              disabled={syncing !== 'idle'}
+              onClick={async () => {
+                if (!confirm(`Enviar os dados deste aparelho (${(db.animais ?? []).length} animais) para a nuvem, sobrescrevendo o que está salvo lá?`)) return;
+                setSyncing('uploading');
+                try {
+                  await publishToCloud();
+                  toast.success('Dados enviados para a nuvem!');
+                } catch (e: unknown) {
+                  toast.error(e instanceof Error ? e.message : 'Erro ao enviar.');
+                } finally {
+                  setSyncing('idle');
+                }
+              }}
+              className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-dashed border-green-300 text-green-800 hover:bg-green-50 transition-colors disabled:opacity-50"
+            >
+              {syncing === 'uploading'
+                ? <RefreshCw className="h-5 w-5 animate-spin" />
+                : <CloudUpload className="h-5 w-5" />}
+              <div className="text-center">
+                <p className="text-xs font-bold">Enviar para nuvem</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {(db.animais ?? []).length} animais · {(db.eventos ?? []).length} eventos
+                </p>
+              </div>
+            </button>
+
+            {/* Baixar da nuvem */}
+            <button
+              disabled={syncing !== 'idle'}
+              onClick={async () => {
+                if (!confirm('Baixar dados da nuvem? Os dados locais deste aparelho serão substituídos.')) return;
+                setSyncing('downloading');
+                try {
+                  await pullFromCloud();
+                  toast.success('Dados baixados da nuvem!');
+                } catch (e: unknown) {
+                  toast.error(e instanceof Error ? e.message : 'Erro ao baixar.');
+                } finally {
+                  setSyncing('idle');
+                }
+              }}
+              className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-dashed border-blue-300 text-blue-800 hover:bg-blue-50 transition-colors disabled:opacity-50"
+            >
+              {syncing === 'downloading'
+                ? <RefreshCw className="h-5 w-5 animate-spin" />
+                : <CloudDownload className="h-5 w-5" />}
+              <div className="text-center">
+                <p className="text-xs font-bold">Baixar da nuvem</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Sobrescreve dados locais</p>
+              </div>
+            </button>
+          </div>
         </div>
       </Section>
 

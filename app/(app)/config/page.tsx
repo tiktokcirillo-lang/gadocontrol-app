@@ -1,14 +1,16 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
-import { Save, Download, Upload, FileText, FileJson, AlertTriangle, Copy, RefreshCw, CloudUpload, CloudDownload, Wifi } from 'lucide-react';
+import { Save, Download, Upload, FileText, FileJson, AlertTriangle, Copy, RefreshCw, CloudUpload, CloudDownload, Wifi, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { doc, deleteDoc } from 'firebase/firestore';
+import { db as firestore } from '@/lib/firebase';
 import { useDB } from '@/hooks/useDB';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { exportarJSON, importarJSON, exportarCSVFinanceiro, abrirRelatorioPDF, exportarXLSX, importarXLSX } from '@/lib/exportar';
-import { fmtDate, saveDB } from '@/lib/db';
+import { emptyDB, fmtDate, saveDB } from '@/lib/db';
 import { gerarDemoDB } from '@/lib/demoData';
 import { TeamManager } from '@/components/config/TeamManager';
 import { gerarCodigo, publicarCodigo } from '@/lib/codigoPeao';
@@ -21,7 +23,8 @@ const ESTADOS_BR = [
 
 export default function ConfigPage() {
   const { db, update, publishToCloud, pullFromCloud } = useDB();
-  const [syncing, setSyncing] = useState<'idle' | 'uploading' | 'downloading'>('idle');
+  const [syncing,   setSyncing]   = useState<'idle' | 'uploading' | 'downloading'>('idle');
+  const [resetting, setResetting] = useState(false);
   const { user } = useAuth();
   const meta = db.meta ?? {};
   const [codigoFaz, setCodigoFaz] = useState<string>('');
@@ -68,6 +71,32 @@ export default function ConfigPage() {
 
   function set(k: keyof typeof faz, v: string) {
     setFaz(f => ({ ...f, [k]: v }));
+  }
+
+  async function resetarTodosDados() {
+    if (!confirm(
+      '⚠️ ATENÇÃO\n\nIsso vai apagar TODOS os dados da fazenda:\n• Animais\n• Eventos\n• Financeiro\n• Estoque\n• Lotes e Pastos\n\nTanto neste aparelho quanto na nuvem.\nEsta ação NÃO pode ser desfeita.'
+    )) return;
+    if (!confirm('Tem certeza absoluta? Os dados serão perdidos permanentemente.')) return;
+
+    setResetting(true);
+    try {
+      // 1. Limpa localStorage
+      saveDB(emptyDB());
+
+      // 2. Remove documento do Firestore
+      if (user) {
+        try {
+          await deleteDoc(doc(firestore, 'farms', user.uid, 'data', 'snapshot'));
+        } catch { /* ignora se não existia */ }
+      }
+
+      toast.success('Todos os dados foram apagados. Recarregando...');
+      setTimeout(() => window.location.reload(), 1200);
+    } catch {
+      toast.error('Erro ao apagar dados. Tente novamente.');
+      setResetting(false);
+    }
   }
 
   function salvarFazenda() {
@@ -459,6 +488,29 @@ export default function ConfigPage() {
       <Section title="👥 Equipe">
         <TeamManager />
       </Section>
+
+      {/* ── Zona de Perigo ────────────────────────────────────────────── */}
+      <div className="rounded-xl border-2 border-red-200 bg-red-50 dark:bg-red-950/20 overflow-hidden">
+        <p className="text-[11px] font-black text-red-700 uppercase tracking-widest px-4 py-3 border-b border-red-200 bg-red-100/60 dark:bg-red-900/30 flex items-center gap-2">
+          <AlertTriangle className="h-3.5 w-3.5" /> Zona de Perigo
+        </p>
+        <div className="p-4 space-y-3">
+          <p className="text-xs text-red-800 dark:text-red-300">
+            Apaga <strong>todos os dados da fazenda</strong> permanentemente — animais, eventos, financeiro, estoque, lotes e pastos.
+            Esta ação não pode ser desfeita.
+          </p>
+          <button
+            disabled={resetting}
+            onClick={resetarTodosDados}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-red-400 text-sm font-black text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors disabled:opacity-50"
+          >
+            {resetting
+              ? <RefreshCw className="h-4 w-4 animate-spin" />
+              : <Trash2 className="h-4 w-4" />}
+            {resetting ? 'Apagando...' : 'Apagar todos os dados'}
+          </button>
+        </div>
+      </div>
 
     </div>
   );

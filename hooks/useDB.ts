@@ -1,7 +1,7 @@
 'use client';
 import { useState, useCallback, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db as firestore } from '@/lib/firebase';
 import { puxarDados, publicarDados } from '@/lib/members';
 import { getDB, saveDB } from '@/lib/db';
@@ -69,6 +69,7 @@ async function lerCaminhoLegado(uid: string): Promise<DB | null> {
 // instâncias de useDB montadas simultaneamente.
 let _syncPromise: Promise<void> | null = null;
 let _syncUid: string | null = null;
+let _syncWarning: string | null = null;
 
 function initCloudSync(): Promise<void> {
   if (_syncPromise) return _syncPromise;
@@ -107,9 +108,24 @@ function initCloudSync(): Promise<void> {
             await publicarDados(user.uid, local);
           }
         }
-        // Se remote === null: não faz auto-push.
-        // Isso evita que dados de demo ou vazios sobrescrevam dados reais na nuvem.
-        // O usuário deve usar o botão "Enviar para a nuvem" na tela de Configurações.
+        if (!remote) {
+          // Não faz auto-push — evita sobrescrever dados reais na nuvem com estado vazio.
+          // Verifica se existe uma fazenda para este usuário; se sim, os dados deveriam existir.
+          try {
+            const q = query(
+              collection(firestore, 'fazendas'),
+              where('members', 'array-contains', user.uid),
+            );
+            const snap = await getDocs(q);
+            if (!snap.empty) {
+              _syncWarning =
+                'Seus dados na nuvem não foram encontrados. ' +
+                'Use "Puxar da nuvem" nas Configurações ou entre em contato com o suporte.';
+            }
+          } catch (e) {
+            console.warn('[useDB] Falha ao verificar fazendas:', e);
+          }
+        }
 
       } catch (e) {
         console.warn('[useDB] Falha na sincronização com a nuvem:', e);
@@ -132,10 +148,12 @@ export function useDB() {
     return data;
   });
   const [version, setVersion] = useState(0);
+  const [warning, setWarning] = useState<string | null>(null);
 
   // Na primeira montagem: aguarda sync do Firestore e atualiza estado local
   useEffect(() => {
     initCloudSync().then(() => {
+      if (_syncWarning) setWarning(_syncWarning);
       const synced = getDB();
       let dirty = repararStatusAnimais(synced);
       if (repararMorteLancamentos(synced)) dirty = true;
@@ -164,7 +182,11 @@ export function useDB() {
     setVersion(v => v + 1);
     // 2. Push para Firestore em background (não bloqueia a UI)
     const uid = _syncUid ?? auth.currentUser?.uid;
-    if (uid) void publicarDados(uid, current);
+    if (uid) {
+      publicarDados(uid, current).catch(e =>
+        console.error('[useDB] Falha ao publicar dados:', e),
+      );
+    }
   }, []);
 
   const refresh = useCallback(() => {
@@ -199,5 +221,5 @@ export function useDB() {
     setDB({ ...remote });
   }, []);
 
-  return { db, update, refresh, version, publishToCloud, pullFromCloud };
+  return { db, update, refresh, version, publishToCloud, pullFromCloud, warning };
 }

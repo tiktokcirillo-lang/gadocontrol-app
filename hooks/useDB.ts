@@ -6,6 +6,7 @@ import { auth, db as firestore } from '@/lib/firebase';
 import { puxarDados, publicarDados } from '@/lib/members';
 import { getDB, saveDB } from '@/lib/db';
 import { repararMorteLancamentos } from '@/lib/eventos';
+import { getPeaoOwner } from '@/lib/codigoPeao';
 import type { DB } from '@/lib/types';
 
 /**
@@ -181,7 +182,7 @@ export function useDB() {
     setDB({ ...current });
     setVersion(v => v + 1);
     // 2. Push para Firestore em background (não bloqueia a UI)
-    const uid = _syncUid ?? auth.currentUser?.uid;
+    const uid = getPeaoOwner() ?? _syncUid ?? auth.currentUser?.uid;
     if (uid) {
       publicarDados(uid, current).catch(e =>
         console.error('[useDB] Falha ao publicar dados:', e),
@@ -198,7 +199,7 @@ export function useDB() {
    * Use na tela de Config para garantir que este dispositivo "vence" o sync.
    */
   const publishToCloud = useCallback(async (): Promise<void> => {
-    const uid = _syncUid ?? auth.currentUser?.uid;
+    const uid = getPeaoOwner() ?? _syncUid ?? auth.currentUser?.uid;
     if (!uid) throw new Error('Usuário não autenticado.');
     const current = getDB();
     current.meta = { ...current.meta, updatedAt: new Date().toISOString(), syncedAt: new Date().toISOString() };
@@ -212,7 +213,7 @@ export function useDB() {
    * Use na tela de Config para puxar dados de outro dispositivo.
    */
   const pullFromCloud = useCallback(async (): Promise<void> => {
-    const uid = _syncUid ?? auth.currentUser?.uid;
+    const uid = getPeaoOwner() ?? _syncUid ?? auth.currentUser?.uid;
     if (!uid) throw new Error('Usuário não autenticado.');
     const remote = await puxarDados(uid);
     if (!remote) throw new Error('Nenhum dado encontrado na nuvem para esta conta.');

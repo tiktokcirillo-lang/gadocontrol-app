@@ -33,9 +33,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!getPeaoOwner()) return;
-    const allowed = ['/app/campo', '/app/animais', '/app/saude', '/app/estoque'];
+    const allowed = ['/campo', '/animais', '/saude', '/estoque'];
     const ok = allowed.some(p => pathname === p || pathname.startsWith(p + '/'));
-    if (!ok) router.replace('/app/campo');
+    if (!ok) router.replace('/campo');
   }, [pathname, router]);
 
   // Verifica alertas sanitários na inicialização (apenas uma vez)

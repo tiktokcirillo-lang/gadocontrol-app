@@ -1,6 +1,5 @@
 import type { PrecacheEntry, SerwistGlobalConfig } from "serwist";
-import { Serwist } from "serwist";
-import { defaultCache } from "@serwist/next/worker";
+import { CacheFirst, Serwist } from "serwist";
 
 declare global {
   interface ServiceWorkerGlobalScope extends SerwistGlobalConfig {
@@ -15,7 +14,16 @@ const serwist = new Serwist({
   skipWaiting: true,
   clientsClaim: true,
   navigationPreload: false,
-  runtimeCaching: defaultCache,
+  runtimeCaching: [
+    {
+      matcher: /^https:\/\/fonts\.(googleapis|gstatic)\.com/,
+      handler: new CacheFirst({ cacheName: "google-fonts" }),
+    },
+    {
+      matcher: /\.(?:png|jpg|jpeg|svg|gif|ico|webp)$/,
+      handler: new CacheFirst({ cacheName: "images" }),
+    },
+  ],
 });
 
 serwist.addEventListeners();

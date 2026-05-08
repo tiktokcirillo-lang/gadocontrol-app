@@ -28,13 +28,13 @@ export async function publicarCodigo(ownerUid: string, codigo: string): Promise<
 
 // Peão: entra com o código e carrega dados do owner
 export async function entrarComCodigo(codigo: string): Promise<void> {
+  // Faz login anônimo no Firebase (para leitura autenticada)
+  await signInAnonymously(auth);
+
   const snap = await getDoc(doc(firestore, 'fazendas', codigo.trim().toUpperCase()));
   if (!snap.exists()) throw new Error('Código inválido ou fazenda não encontrada.');
 
   const ownerUid = snap.data().ownerUid as string;
-
-  // Faz login anônimo no Firebase (para leitura autenticada)
-  await signInAnonymously(auth);
 
   // Puxa os dados publicados pelo dono
   const db = await puxarDados(ownerUid);

@@ -235,7 +235,7 @@ export interface UserProfile {
 }
 
 // Constantes
-export const PLAN_LIMIT_FREE = 30;
+export const PLAN_LIMIT_FREE = 100;
 export const BETA_TRIAL_DAYS = 60;
 export const GESTACAO_DIAS = 285;
 export const ARROBA_KG = 15;

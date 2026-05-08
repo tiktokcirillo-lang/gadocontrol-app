@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Home, Beef, Heart, BarChart2, DollarSign, Package, Settings2, Zap } from 'lucide-react';
+import { getPeaoOwner } from '@/lib/codigoPeao';
 
 const NAV_ITEMS = [
   { href: '/app',            label: 'Início',    icon: Home       },
@@ -14,13 +15,19 @@ const NAV_ITEMS = [
   { href: '/app/gestao',     label: 'Gestão',    icon: Settings2  },
 ] as const;
 
+const PEAO_ALLOWED_HREFS = new Set(['/app/campo', '/app/animais', '/app/saude', '/app/estoque']);
+
 export function BottomNav() {
   const pathname = usePathname();
+  const isPeao = !!getPeaoOwner();
+  const visibleItems = isPeao
+    ? NAV_ITEMS.filter(item => PEAO_ALLOWED_HREFS.has(item.href))
+    : NAV_ITEMS;
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="max-w-2xl mx-auto flex">
-        {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+        {visibleItems.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || (href !== '/app' && pathname.startsWith(href));
           return (
             <Link

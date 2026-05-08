@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { BottomNav } from '@/components/layout/BottomNav';
 import { AppHeader } from '@/components/layout/AppHeader';
@@ -14,6 +14,7 @@ import { DBProvider } from '@/contexts/DBContext';
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
@@ -29,6 +30,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     const isPeao = !!getPeaoOwner();
     if (!loading && !user && !isPeao) router.replace('/login');
   }, [user, loading, router]);
+
+  useEffect(() => {
+    if (!getPeaoOwner()) return;
+    const allowed = ['/app/campo', '/app/animais', '/app/saude', '/app/estoque'];
+    const ok = allowed.some(p => pathname === p || pathname.startsWith(p + '/'));
+    if (!ok) router.replace('/app/campo');
+  }, [pathname, router]);
 
   // Verifica alertas sanitários na inicialização (apenas uma vez)
   useEffect(() => {

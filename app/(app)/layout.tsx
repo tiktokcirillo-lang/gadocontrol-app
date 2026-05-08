@@ -9,6 +9,7 @@ import { getDB } from '@/lib/db';
 import { getPeaoOwner } from '@/lib/codigoPeao';
 import { verificarAlertasSaude } from '@/lib/pushNotifications';
 import { Loader2 } from 'lucide-react';
+import { DBProvider } from '@/contexts/DBContext';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -58,7 +59,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="flex flex-col min-h-screen max-w-2xl mx-auto">
       <AppHeader />
       <main className="flex-1 overflow-y-auto pb-20 px-3 pt-3">
-        {children}
+        <DBProvider>{children}</DBProvider>
       </main>
       <BottomNav />
       {showOnboarding && <OnboardingTour onClose={() => setShowOnboarding(false)} />}

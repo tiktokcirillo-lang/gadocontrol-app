@@ -9,7 +9,7 @@ import { fmtDate, getCabecas, idadeMeses } from '@/lib/db';
 interface Props {
   animal:   Animal;
   onEdit:   (id: string) => void;
-  onDelete: (id: string) => void;
+  onDelete?: (id: string) => void;
   onDetail: (id: string) => void;
 }
 
@@ -54,12 +54,14 @@ export function AnimalCard({ animal, onEdit, onDelete, onDetail }: Props) {
         >
           <Pencil size={13} />
         </button>
-        <button
-          onClick={e => { e.stopPropagation(); onDelete(animal.id); }}
-          className="p-1.5 rounded-lg hover:bg-red-50 text-muted-foreground hover:text-red-500"
-        >
-          <Trash2 size={13} />
-        </button>
+        {onDelete && (
+          <button
+            onClick={e => { e.stopPropagation(); onDelete(animal.id); }}
+            className="p-1.5 rounded-lg hover:bg-red-50 text-muted-foreground hover:text-red-500"
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
         <ChevronRight size={14} className="text-muted-foreground" />
       </div>
     </div>

@@ -11,6 +11,7 @@ import { AnimalForm } from '@/components/animals/AnimalForm';
 import { AnimalDetail } from '@/components/animals/AnimalDetail';
 import { EventoForm } from '@/components/animals/EventoForm';
 import { useAuth } from '@/contexts/AuthContext';
+import { getPeaoOwner } from '@/lib/codigoPeao';
 import { imprimirGTA } from '@/lib/exportar';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -25,6 +26,7 @@ const CATEGORIAS: AnimalCategoria[] = [
 export default function AnimaisPage() {
   const { db, update }        = useDB();
   const { plan }              = useAuth();
+  const isPeao                = !!getPeaoOwner();
   const [search,  setSearch]  = useState('');
   const [status,  setStatus]  = useState<StatusFilter>('Vivo');
   const [catFilt, setCatFilt] = useState<AnimalCategoria | 'todas'>('todas');
@@ -180,7 +182,7 @@ export default function AnimaisPage() {
           <p className="text-xs text-muted-foreground">{filtered.length} resultado(s)</p>
           {filtered.map(a => (
             <AnimalCard key={a.id} animal={a}
-              onEdit={openEdit} onDelete={handleDelete} onDetail={setDetailId} />
+              onEdit={openEdit} onDelete={!isPeao ? handleDelete : undefined} onDetail={setDetailId} />
           ))}
         </div>
       )}

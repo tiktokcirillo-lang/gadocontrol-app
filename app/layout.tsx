@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { ClientProviders } from '@/components/providers/ClientProviders';
+import { IOSInstallBanner } from '@/components/shared/IOSInstallBanner';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -41,6 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${inter.className} min-h-full antialiased`}>
         <ClientProviders>
           {children}
+          <IOSInstallBanner />
         </ClientProviders>
       </body>
     </html>
